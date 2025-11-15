@@ -11,6 +11,7 @@ import streamlit as st
 
 @dataclass
 class Player:
+    name: str
     role: str   # "Gk", "Def", "Mid", "Att"
     q: float
     kp: float
@@ -49,6 +50,86 @@ class Team:
 
 
 # ============================
+#   PARSER ZA PASTE IZ ML
+# ============================
+
+"""
+Očekivan format (copy/paste iz ML Players tabele):
+
+Role Name Age Q DQ Kp KpD Tk TkD Pa PaD Sh ShD He HeD Sp SpD St StD Pe PeD Bc BcD Tot TotD Fit SA
+
+Parser koristi:
+Q  = kolona 3
+Kp = 5
+Tk = 7
+Pa = 9
+Sh = 11
+He = 13
+Sp = 15
+St = 17
+Pe = 19
+Bc = 21
+"""
+
+def parse_players_block_ml(text: str) -> List[Player]:
+    players: List[Player] = []
+    lines = [ln for ln in text.strip().splitlines() if ln.strip()]
+    for line in lines:
+        # preskoči header
+        if line.lower().startswith("role "):
+            continue
+
+        # delimiter: pre svega TAB, a ako nema, whitespace
+        if "\t" in line:
+            parts = [p.strip() for p in line.split("\t")]
+        elif "," in line:
+            parts = [p.strip() for p in line.split(",")]
+        else:
+            parts = [p for p in line.split()]
+
+        if len(parts) < 22:
+            # nedovoljno kolona, preskoči
+            continue
+
+        try:
+            role = parts[0]
+            name = parts[1]
+            q  = float(parts[3])
+            kp = float(parts[5])
+            tk = float(parts[7])
+            pa = float(parts[9])
+            sh = float(parts[11])
+            he = float(parts[13])
+            sp = float(parts[15])
+            stg = float(parts[17])
+            pe = float(parts[19])
+            bc = float(parts[21])
+        except ValueError:
+            continue
+
+        players.append(Player(
+            name=name,
+            role=role,
+            q=q,
+            kp=kp,
+            tk=tk,
+            pa=pa,
+            sh=sh,
+            he=he,
+            sp=sp,
+            st=stg,
+            pe=pe,
+            bc=bc,
+        ))
+
+    # uzmi samo prvih 11, za startnu postavu
+    if len(players) > 11:
+        players = players[:11]
+
+    return players
+
+
+# ============================
 #   TAKTIČKI BONUSI
 # ============================
 
@@ -83,7 +164,6 @@ def style_match_bonus(my_style: str, opp_style: str) -> float:
     return 0.0
 
 
-# gruba tabela ko koga voli po formaciji – lako se proširi
 FORMATION_MATCHUPS = {
     ("4-4-2", "3-5-2"):  +1.0,
     ("3-5-2", "4-4-2"):  -1.0,
@@ -108,7 +188,7 @@ def average_q(team: Team) -> float:
 def compute_line_ratings(team: Team) -> Tuple[float, float]:
     """
     Vraća (attack_rating, defense_rating).
-    Koristi sve atribute + team stats + pressure.
+    Koristi sve atribute + team stats + pressure + home.
     """
 
     base_q = average_q(team)
@@ -298,56 +378,28 @@ def team_stats_inputs(prefix: str) -> TeamStats:
     )
 
 
-def parse_formation(formation: str) -> Tuple[int, int, int]:
-    parts = formation.split("-")
-    if len(parts) < 3:
-        return 4, 4, 2
-    try:
-        d = int(parts[0])
-        m = int(parts[1])
-        a = int(parts[2])
-        return d, m, a
-    except ValueError:
-        return 4, 4, 2
-
-
-def players_inputs_for_role(side: str, role_label: str, role_code: str, count: int) -> List[Player]:
-    players: List[Player] = []
-    if count <= 0:
-        return players
-
-    st.markdown(f"**{side} – {role_label} ({count})**")
-
-    for i in range(count):
-        cols = st.columns(11)
-        # Q, Kp, Tk, Pa, Sh, He, Sp, St, Pe, Bc
-        q  = cols[0].number_input(f"{role_label}{i+1} Q", 0, 100, 90, key=f"{side}_{role_label}{i}_q")
-        kp = cols[1].number_input("Kp", 0, 100, 80, key=f"{side}_{role_label}{i}_kp")
-        tk = cols[2].number_input("Tk", 0, 100, 80, key=f"{side}_{role_label}{i}_tk")
-        pa = cols[3].number_input("Pa", 0, 100, 80, key=f"{side}_{role_label}{i}_pa")
-        sh = cols[4].number_input("Sh", 0, 100, 80, key=f"{side}_{role_label}{i}_sh")
-        he = cols[5].number_input("He", 0, 100, 80, key=f"{side}_{role_label}{i}_he")
-        sp = cols[6].number_input("Sp", 0, 100, 80, key=f"{side}_{role_label}{i}_sp")
-        stg = cols[7].number_input("St", 0, 100, 80, key=f"{side}_{role_label}{i}_st")
-        pe = cols[8].number_input("Pe", 0, 100, 80, key=f"{side}_{role_label}{i}_pe")
-        bc = cols[9].number_input("Bc", 0, 100, 80, key=f"{side}_{role_label}{i}_bc")
-
-        players.append(Player(
-            role=role_code,
-            q=q, kp=kp, tk=tk, pa=pa, sh=sh,
-            he=he, sp=sp, st=stg, pe=pe, bc=bc
-        ))
-
-    st.markdown("---")
-    return players
-
-
-def build_team_ui(side: str) -> Team:
+def build_team_ui(side: str) -> Tuple[Team, str]:
     st.header(f"Tim: {side}")
 
     name = st.text_input(f"{side} – ime tima", value=side)
 
-    col1, col2, col3, col4 = st.columns(4)
+    st.markdown(
+        f"**{side} – Nalepi 11 igrača direktno iz ML Players tabele (bez menjanja):**  \n"
+        "Kopiraj redove (Role, Name, Age, Q, DQ, Kp, KpD, Tk, TkD, Pa, PaD, Sh, ShD, He, HeD, "
+        "Sp, SpD, St, StD, Pe, PeD, Bc, BcD, ...)."
+    )
+    players_block = st.text_area(f"{side} – paste igrača", value="", height=220)
+
+    players = parse_players_block_ml(players_block)
+    st.write(f"Detektovano igrača: {len(players)} (uzima se prvih 11 za simulaciju).")
+
+    # team stats
+    stats = team_stats_inputs(side)
+
+    # taktičke opcije
+    st.subheader(f"{side} – Taktika")
+
+    col1, col2, col3 = st.columns(3)
     with col1:
         formation = st.selectbox(
             f"{side} – formacija",
@@ -366,26 +418,6 @@ def build_team_ui(side: str) -> Team:
             ["normal", "attacking", "defending", "counter-attacking"],
             index=0
         )
-    with col4:
-        home = st.checkbox(f"{side} je domaćin?", value=(side == "Ja"))
-
-    stats = team_stats_inputs(side)
-
-    # formacija → broj def/mid/att
-    d_count, m_count, a_count = parse_formation(formation)
-
-    st.markdown(f"### {side} – igrači (1 Gk, {d_count} Def, {m_count} Mid, {a_count} Att)")
-
-    # GK – uvek 1
-    gk_players = players_inputs_for_role(side, "GK", "Gk", 1)
-    def_players = players_inputs_for_role(side, "Def", "Def", d_count)
-    mid_players = players_inputs_for_role(side, "Mid", "Mid", m_count)
-    att_players = players_inputs_for_role(side, "Att", "Att", a_count)
-
-    players = gk_players + def_players + mid_players + att_players
-
-    if len(players) != 1 + d_count + m_count + a_count:
-        st.warning(f"{side}: broj igrača ne odgovara formaciji.")
 
     team = Team(
         name=name,
@@ -394,9 +426,9 @@ def build_team_ui(side: str) -> Team:
         style=style,
         pressure=pressure,
         stats=stats,
-        home=home,
+        home=False,   # biće postavljeno kasnije na osnovu terena
     )
-    return team
+    return team, formation
 
 
 # ============================
@@ -410,29 +442,44 @@ def main():
         """
         Ovo NIJE zvanični ML engine, ali koristi:
 
-        - sve glavne atribute igrača (Q, Kp, Tk, Pa, Sh, He, Sp, St, Pe, Bc)
-        - team stats (Attacking, Defending, Counter, Offside, FK, Corner, Penalty,
-          Teamplay, Understanding)
+        - Q, Kp, Tk, Pa, Sh, He, Sp, St, Pe, Bc za svakog igrača (paste direktno iz ML)
+        - team stats (Attacking, Defending, Counter, Offside, FK, Corner, Penalty, Teamplay, Understanding)
         - stil igre (Mixed / Continental / Longballs) i njihov RPS odnos
         - formacija vs formacija (4-4-2 vs 3-5-2 itd.)
-        - prednost domaćeg terena
+        - prednost domaćeg terena ili neutralni teren
         - taktički pressure (Attacking / Normal / Defending / Counter-attacking)
-
-        Unesi svoje i protivnikove atribute, pa pokreni simulacije.
         """
+    )
+
+    # izbor terena – neutralno / ja domaćin / protivnik domaćin
+    ground = st.radio(
+        "Teren",
+        ["Neutralno", "Ja sam domaćin", "Protivnik je domaćin"],
+        index=0
     )
 
     colA, colB = st.columns(2)
     with colA:
-        team_a = build_team_ui("Ja")
+        team_a, _ = build_team_ui("Ja")
     with colB:
-        team_b = build_team_ui("Protivnik")
+        team_b, _ = build_team_ui("Protivnik")
+
+    # postavi home flag prema izboru terena
+    if ground == "Neutralno":
+        team_a.home = False
+        team_b.home = False
+    elif ground == "Ja sam domaćin":
+        team_a.home = True
+        team_b.home = False
+    else:  # Protivnik je domaćin
+        team_a.home = False
+        team_b.home = True
 
     n_matches = st.number_input("Broj simulacija", 50, 5000, 500, step=50)
 
     if st.button("Pokreni simulacije"):
-        if len(team_a.players) != len(team_b.players) or len(team_a.players) == 0:
-            st.error("Oba tima moraju imati validan broj igrača za izabranu formaciju.")
+        if len(team_a.players) < 11 or len(team_b.players) < 11:
+            st.error("Oba tima moraju imati bar 11 igrača (nalepi tačno startnu postavu).")
             return
 
         win_a, draw, win_b = simulate_series(team_a, team_b, n_matches=int(n_matches))
