@@ -1,7 +1,7 @@
 import math
 import random
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 
 import streamlit as st
 
@@ -79,7 +79,7 @@ def parse_players_block_ml(text: str) -> List[Player]:
         if line.lower().startswith("role "):
             continue
 
-        # delimiter: pre svega TAB, a ako nema, whitespace
+        # delimiter: pre svega TAB, ili zarez, ili whitespace
         if "\t" in line:
             parts = [p.strip() for p in line.split("\t")]
         elif "," in line:
@@ -88,7 +88,6 @@ def parse_players_block_ml(text: str) -> List[Player]:
             parts = [p for p in line.split()]
 
         if len(parts) < 22:
-            # nedovoljno kolona, preskoči
             continue
 
         try:
@@ -333,8 +332,9 @@ def simulate_single_match(team_a: Team, team_b: Team) -> Tuple[int, int]:
     return goals_a, goals_b
 
 
-def simulate_series(team_a: Team, team_b: Team, n_matches: int = 500) -> Tuple[float, float, float]:
+def simulate_series(team_a: Team, team_b: Team, n_matches: int = 500) -> Tuple[float, float, float, Dict[Tuple[int, int], int]]:
     win_a = draw = win_b = 0
+    score_counts: Dict[Tuple[int, int], int] = {}
     for _ in range(n_matches):
         ga, gb = simulate_single_match(team_a, team_b)
         if ga > gb:
@@ -343,10 +343,12 @@ def simulate_series(team_a: Team, team_b: Team, n_matches: int = 500) -> Tuple[f
             win_b += 1
         else:
             draw += 1
+        score_counts[(ga, gb)] = score_counts.get((ga, gb), 0) + 1
 
     return (100 * win_a / n_matches,
             100 * draw  / n_matches,
-            100 * win_b / n_matches)
+            100 * win_b / n_matches,
+            score_counts)
 
 
 # ============================
@@ -378,27 +380,14 @@ def team_stats_inputs(prefix: str) -> TeamStats:
     )
 
 
-def build_team_ui(side: str) -> Tuple[Team, str]:
+def build_team_ui(side: str) -> Team:
     st.header(f"Tim: {side}")
 
+    # TIM
     name = st.text_input(f"{side} – ime tima", value=side)
 
-    st.markdown(
-        f"**{side} – Nalepi 11 igrača direktno iz ML Players tabele (bez menjanja):**  \n"
-        "Kopiraj redove (Role, Name, Age, Q, DQ, Kp, KpD, Tk, TkD, Pa, PaD, Sh, ShD, He, HeD, "
-        "Sp, SpD, St, StD, Pe, PeD, Bc, BcD, ...)."
-    )
-    players_block = st.text_area(f"{side} – paste igrača", value="", height=220)
-
-    players = parse_players_block_ml(players_block)
-    st.write(f"Detektovano igrača: {len(players)} (uzima se prvih 11 za simulaciju).")
-
-    # team stats
-    stats = team_stats_inputs(side)
-
-    # taktičke opcije
+    # TAKTIKA
     st.subheader(f"{side} – Taktika")
-
     col1, col2, col3 = st.columns(3)
     with col1:
         formation = st.selectbox(
@@ -419,6 +408,55 @@ def build_team_ui(side: str) -> Tuple[Team, str]:
             index=0
         )
 
+    # SASTAV – PASTE IZ ML
+    st.subheader(f"{side} – Sastav (paste direktno iz ML Players)")
+    st.markdown(
+        "Nalepi 11 igrača direktno iz ML Players tabele (kopiraš redove sa Role, Name, Age, Q, ...)."
+    )
+    players_block = st.text_area(f"{side} – paste igrača", value="", height=220)
+
+    players = parse_players_block_ml(players_block)
+    st.write(f"Detektovano igrača: {len(players)} (uzima se prvih 11 za simulaciju).")
+
+    # Vizuelna tabela atributa + dropdown za poziciju
+    if players:
+        st.markdown(f"**{side} – tabela atributa i pozicija**")
+        pos_options = ["GK", "DL", "DC", "DR", "DML", "DMC", "DMR", "ML", "MC", "MR", "AML", "AMC", "AMR", "ST"]
+
+        for i, p in enumerate(players):
+            cols = st.columns(8)
+            with cols[0]:
+                st.write(p.name)
+            with cols[1]:
+                st.write(p.role)
+            with cols[2]:
+                default_pos = "GK"
+                if p.role.lower() == "def":
+                    default_pos = "DC"
+                elif p.role.lower() == "mid":
+                    default_pos = "MC"
+                elif p.role.lower() == "att":
+                    default_pos = "ST"
+                st.selectbox(
+                    "Pozicija",
+                    pos_options,
+                    index=pos_options.index(default_pos),
+                    key=f"{side}_pos_{i}"
+                )
+            with cols[3]:
+                st.write(f"Q: {p.q:.0f}")
+            with cols[4]:
+                st.write(f"Kp/Tk: {p.kp:.0f}/{p.tk:.0f}")
+            with cols[5]:
+                st.write(f"Pa/Sh: {p.pa:.0f}/{p.sh:.0f}")
+            with cols[6]:
+                st.write(f"He/Sp: {p.he:.0f}/{p.sp:.0f}")
+            with cols[7]:
+                st.write(f"St/Pe/Bc: {p.st:.0f}/{p.pe:.0f}/{p.bc:.0f}")
+
+    # STATS
+    stats = team_stats_inputs(side)
+
     team = Team(
         name=name,
         players=players,
@@ -428,7 +466,7 @@ def build_team_ui(side: str) -> Tuple[Team, str]:
         stats=stats,
         home=False,   # biće postavljeno kasnije na osnovu terena
     )
-    return team, formation
+    return team
 
 
 # ============================
@@ -438,31 +476,20 @@ def build_team_ui(side: str) -> Tuple[Team, str]:
 def main():
     st.title("ManagerLeague – taktički simulator (fan-made)")
 
-    st.markdown(
-        """
-        Ovo NIJE zvanični ML engine, ali koristi:
-
-        - Q, Kp, Tk, Pa, Sh, He, Sp, St, Pe, Bc za svakog igrača (paste direktno iz ML)
-        - team stats (Attacking, Defending, Counter, Offside, FK, Corner, Penalty, Teamplay, Understanding)
-        - stil igre (Mixed / Continental / Longballs) i njihov RPS odnos
-        - formacija vs formacija (4-4-2 vs 3-5-2 itd.)
-        - prednost domaćeg terena ili neutralni teren
-        - taktički pressure (Attacking / Normal / Defending / Counter-attacking)
-        """
-    )
-
-    # izbor terena – neutralno / ja domaćin / protivnik domaćin
+    # TEREN
+    st.subheader("Teren")
     ground = st.radio(
-        "Teren",
+        "",
         ["Neutralno", "Ja sam domaćin", "Protivnik je domaćin"],
-        index=0
+        index=0,
+        horizontal=True
     )
 
     colA, colB = st.columns(2)
     with colA:
-        team_a, _ = build_team_ui("Ja")
+        team_a = build_team_ui("Ja")
     with colB:
-        team_b, _ = build_team_ui("Protivnik")
+        team_b = build_team_ui("Protivnik")
 
     # postavi home flag prema izboru terena
     if ground == "Neutralno":
@@ -475,6 +502,8 @@ def main():
         team_a.home = False
         team_b.home = True
 
+    # BROJ SIMULACIJA
+    st.subheader("Simulacija")
     n_matches = st.number_input("Broj simulacija", 50, 5000, 500, step=50)
 
     if st.button("Pokreni simulacije"):
@@ -482,14 +511,26 @@ def main():
             st.error("Oba tima moraju imati bar 11 igrača (nalepi tačno startnu postavu).")
             return
 
-        win_a, draw, win_b = simulate_series(team_a, team_b, n_matches=int(n_matches))
+        win_a, draw, win_b, score_counts = simulate_series(team_a, team_b, n_matches=int(n_matches))
 
-        st.subheader("Rezultati")
-        st.write(f"Simulirano mečeva: {int(n_matches)}")
+        # REZULTATI %
+        st.subheader("Rezultat simulacije (u %)")
         col1, col2, col3 = st.columns(3)
         col1.metric(f"Pobede {team_a.name}", f"{win_a:.1f} %")
         col2.metric("Nerešeno", f"{draw:.1f} %")
         col3.metric(f"Pobede {team_b.name}", f"{win_b:.1f} %")
+
+        # 5 NAJČEŠĆIH REZULTATA
+        st.subheader("5 najčešćih rezultata")
+
+        if score_counts:
+            total = float(n_matches)
+            top5 = sorted(score_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+            for (ga, gb), cnt in top5:
+                proc = 100.0 * cnt / total
+                st.write(f"{ga} : {gb}  –  {proc:.1f}%  ({cnt} puta)")
+        else:
+            st.write("Nema podataka o rezultatima.")
 
 
 if __name__ == "__main__":
