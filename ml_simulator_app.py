@@ -11,7 +11,6 @@ import streamlit as st
 
 @dataclass
 class Player:
-    name: str
     role: str   # "Gk", "Def", "Mid", "Att"
     q: float
     kp: float
@@ -36,7 +35,6 @@ class TeamStats:
     penalty: float
     understanding: float
     teamplay: float
-    morale: float
 
 
 @dataclass
@@ -45,69 +43,9 @@ class Team:
     players: List[Player]  # tačno 11 iz startne postave
     formation: str         # npr. "4-4-2"
     style: str             # "mixed", "continental", "longballs"
+    pressure: str          # "attacking","normal","defending","counter-attacking"
     stats: TeamStats
     home: bool             # prednost domaćeg terena?
-
-
-# ============================
-#   PARSER ZA IGRAČE
-# ============================
-
-"""
-Očekivan format po liniji (CSV, bez zaglavlja):
-
-Ime,Role,Q,Kp,Tk,Pa,Sh,He,Sp,St,Pe,Bc
-
-Role mora biti jedno od:
-- Gk
-- Def
-- Mid
-- Att
-
-Primer jedne linije:
-Predrag Rajkovic,Gk,96,98,79,86,71,74,97,94,96,95
-"""
-
-def parse_players_block(text: str) -> List[Player]:
-    players = []
-    for line in text.strip().splitlines():
-        if not line.strip():
-            continue
-        parts = [p.strip() for p in line.split(",")]
-        if len(parts) < 12:
-            st.warning(f"Linija nema 12 polja, preskačem: {line}")
-            continue
-        name, role = parts[0], parts[1]
-        try:
-            q  = float(parts[2])
-            kp = float(parts[3])
-            tk = float(parts[4])
-            pa = float(parts[5])
-            sh = float(parts[6])
-            he = float(parts[7])
-            sp = float(parts[8])
-            stg = float(parts[9])
-            pe = float(parts[10])
-            bc = float(parts[11])
-        except ValueError:
-            st.warning(f"Ne mogu da parsiram broj u liniji: {line}")
-            continue
-
-        players.append(Player(
-            name=name,
-            role=role,
-            q=q,
-            kp=kp,
-            tk=tk,
-            pa=pa,
-            sh=sh,
-            he=he,
-            sp=sp,
-            st=stg,
-            pe=pe,
-            bc=bc,
-        ))
-    return players
 
 
 # ============================
@@ -145,7 +83,7 @@ def style_match_bonus(my_style: str, opp_style: str) -> float:
     return 0.0
 
 
-# Gruba tabela ko koga voli po formaciji – lako se proširi
+# gruba tabela ko koga voli po formaciji – lako se proširi
 FORMATION_MATCHUPS = {
     ("4-4-2", "3-5-2"):  +1.0,
     ("3-5-2", "4-4-2"):  -1.0,
@@ -170,7 +108,7 @@ def average_q(team: Team) -> float:
 def compute_line_ratings(team: Team) -> Tuple[float, float]:
     """
     Vraća (attack_rating, defense_rating).
-    Koristi sve atribute + team stats.
+    Koristi sve atribute + team stats + pressure.
     """
 
     base_q = average_q(team)
@@ -180,7 +118,7 @@ def compute_line_ratings(team: Team) -> Tuple[float, float]:
 
     for p in team.players:
         role = p.role.lower()
-        if role in ("att", "a"):
+        if role == "att":
             atk_raw += (
                 0.35 * p.sh +
                 0.25 * p.pa +
@@ -194,7 +132,7 @@ def compute_line_ratings(team: Team) -> Tuple[float, float]:
                 0.10 * p.bc +
                 0.05 * p.st
             )
-        elif role in ("mid", "m"):
+        elif role == "mid":
             atk_raw += (
                 0.25 * p.sh +
                 0.30 * p.pa +
@@ -208,7 +146,7 @@ def compute_line_ratings(team: Team) -> Tuple[float, float]:
                 0.10 * p.bc +
                 0.05 * p.st
             )
-        elif role in ("def", "d"):
+        elif role == "def":
             def_raw += (
                 0.35 * p.tk +
                 0.20 * p.he +
@@ -242,7 +180,6 @@ def compute_line_ratings(team: Team) -> Tuple[float, float]:
 
     def_mod  = 0.06 * (s.defending - 50) / 50.0
     def_mod += 0.03 * (s.offside - 50) / 50.0
-    def_mod += 0.02 * (s.morale - 50) / 50.0
 
     # domaći teren
     home_atk = 0.5 if team.home else 0.0
@@ -250,6 +187,18 @@ def compute_line_ratings(team: Team) -> Tuple[float, float]:
 
     attack_rating  = base_q + atk_raw * 0.15 + atk_mod * 5 + home_atk
     defense_rating = base_q + def_raw * 0.15 + def_mod * 5 + home_def
+
+    # pressure efekat
+    p = team.pressure.lower()
+    if p == "attacking":
+        attack_rating += 1.0
+        defense_rating -= 0.5
+    elif p == "defending":
+        attack_rating -= 0.5
+        defense_rating += 1.0
+    elif p == "counter-attacking":
+        attack_rating += 0.5 * ((s.counter_attacking - 50) / 50.0)
+        defense_rating += 0.2
 
     return attack_rating, defense_rating
 
@@ -321,21 +270,20 @@ def simulate_series(team_a: Team, team_b: Team, n_matches: int = 500) -> Tuple[f
 
 
 # ============================
-#   STREAMLIT GUI
+#   UI POMOĆNE FUNKCIJE
 # ============================
 
 def team_stats_inputs(prefix: str) -> TeamStats:
-    st.subheader(f"{prefix} – Team stats")
-    attacking = st.slider(f"{prefix} Attacking", 0, 100, 50)
-    defending = st.slider(f"{prefix} Defending", 0, 100, 50)
-    counter_attacking = st.slider(f"{prefix} Counter-attacking", 0, 100, 50)
-    offside = st.slider(f"{prefix} Offside", 0, 100, 50)
-    free_kick = st.slider(f"{prefix} Free-kick", 0, 100, 50)
-    corner = st.slider(f"{prefix} Corner", 0, 100, 50)
-    penalty = st.slider(f"{prefix} Penalty", 0, 100, 50)
-    understanding = st.slider(f"{prefix} Understanding", 0, 100, 50)
-    teamplay = st.slider(f"{prefix} Teamplay", 0, 100, 50)
-    morale = st.slider(f"{prefix} Morale", 0, 100, 50)
+    st.subheader(f"{prefix} – Team stats (0–100)")
+    attacking = st.number_input(f"{prefix} Attacking", 0, 100, 50)
+    defending = st.number_input(f"{prefix} Defending", 0, 100, 50)
+    counter_attacking = st.number_input(f"{prefix} Counter-attacking", 0, 100, 50)
+    offside = st.number_input(f"{prefix} Offside", 0, 100, 50)
+    free_kick = st.number_input(f"{prefix} Free-kick", 0, 100, 50)
+    corner = st.number_input(f"{prefix} Corner", 0, 100, 50)
+    penalty = st.number_input(f"{prefix} Penalty", 0, 100, 50)
+    understanding = st.number_input(f"{prefix} Understanding", 0, 100, 50)
+    teamplay = st.number_input(f"{prefix} Teamplay", 0, 100, 50)
 
     return TeamStats(
         attacking=attacking,
@@ -347,8 +295,51 @@ def team_stats_inputs(prefix: str) -> TeamStats:
         penalty=penalty,
         understanding=understanding,
         teamplay=teamplay,
-        morale=morale,
     )
+
+
+def parse_formation(formation: str) -> Tuple[int, int, int]:
+    parts = formation.split("-")
+    if len(parts) < 3:
+        return 4, 4, 2
+    try:
+        d = int(parts[0])
+        m = int(parts[1])
+        a = int(parts[2])
+        return d, m, a
+    except ValueError:
+        return 4, 4, 2
+
+
+def players_inputs_for_role(side: str, role_label: str, role_code: str, count: int) -> List[Player]:
+    players: List[Player] = []
+    if count <= 0:
+        return players
+
+    st.markdown(f"**{side} – {role_label} ({count})**")
+
+    for i in range(count):
+        cols = st.columns(11)
+        # Q, Kp, Tk, Pa, Sh, He, Sp, St, Pe, Bc
+        q  = cols[0].number_input(f"{role_label}{i+1} Q", 0, 100, 90, key=f"{side}_{role_label}{i}_q")
+        kp = cols[1].number_input("Kp", 0, 100, 80, key=f"{side}_{role_label}{i}_kp")
+        tk = cols[2].number_input("Tk", 0, 100, 80, key=f"{side}_{role_label}{i}_tk")
+        pa = cols[3].number_input("Pa", 0, 100, 80, key=f"{side}_{role_label}{i}_pa")
+        sh = cols[4].number_input("Sh", 0, 100, 80, key=f"{side}_{role_label}{i}_sh")
+        he = cols[5].number_input("He", 0, 100, 80, key=f"{side}_{role_label}{i}_he")
+        sp = cols[6].number_input("Sp", 0, 100, 80, key=f"{side}_{role_label}{i}_sp")
+        stg = cols[7].number_input("St", 0, 100, 80, key=f"{side}_{role_label}{i}_st")
+        pe = cols[8].number_input("Pe", 0, 100, 80, key=f"{side}_{role_label}{i}_pe")
+        bc = cols[9].number_input("Bc", 0, 100, 80, key=f"{side}_{role_label}{i}_bc")
+
+        players.append(Player(
+            role=role_code,
+            q=q, kp=kp, tk=tk, pa=pa, sh=sh,
+            he=he, sp=sp, st=stg, pe=pe, bc=bc
+        ))
+
+    st.markdown("---")
+    return players
 
 
 def build_team_ui(side: str) -> Team:
@@ -356,7 +347,7 @@ def build_team_ui(side: str) -> Team:
 
     name = st.text_input(f"{side} – ime tima", value=side)
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         formation = st.selectbox(
             f"{side} – formacija",
@@ -370,46 +361,64 @@ def build_team_ui(side: str) -> Team:
             index=0
         )
     with col3:
+        pressure = st.selectbox(
+            f"{side} – pressure",
+            ["normal", "attacking", "defending", "counter-attacking"],
+            index=0
+        )
+    with col4:
         home = st.checkbox(f"{side} je domaćin?", value=(side == "Ja"))
-
-    st.markdown(
-        f"**{side} – Unesi TAČNO 11 igrača (CSV, po liniji):**  \n"
-        "`Ime,Role,Q,Kp,Tk,Pa,Sh,He,Sp,St,Pe,Bc`"
-    )
-    players_block = st.text_area(f"{side} – igrači", value="", height=220)
 
     stats = team_stats_inputs(side)
 
-    players = parse_players_block(players_block)
-    if len(players) != 11:
-        st.warning(f"{side}: trenutno imaš {len(players)} igrača. Simulator traži tačno 11.")
+    # formacija → broj def/mid/att
+    d_count, m_count, a_count = parse_formation(formation)
+
+    st.markdown(f"### {side} – igrači (1 Gk, {d_count} Def, {m_count} Mid, {a_count} Att)")
+
+    # GK – uvek 1
+    gk_players = players_inputs_for_role(side, "GK", "Gk", 1)
+    def_players = players_inputs_for_role(side, "Def", "Def", d_count)
+    mid_players = players_inputs_for_role(side, "Mid", "Mid", m_count)
+    att_players = players_inputs_for_role(side, "Att", "Att", a_count)
+
+    players = gk_players + def_players + mid_players + att_players
+
+    if len(players) != 1 + d_count + m_count + a_count:
+        st.warning(f"{side}: broj igrača ne odgovara formaciji.")
 
     team = Team(
         name=name,
         players=players,
         formation=formation,
         style=style,
+        pressure=pressure,
         stats=stats,
         home=home,
     )
     return team
 
 
+# ============================
+#   MAIN
+# ============================
+
 def main():
     st.title("ManagerLeague – taktički simulator (fan-made)")
 
     st.markdown(
         """
-        Ovo NIJE zvanični ML engine, ali:
+        Ovo NIJE zvanični ML engine, ali koristi:
 
-        - koristi sve glavne atribute igrača (Q, Kp, Tk, Pa, Sh, He, Sp, St, Pe, Bc)
-        - koristi team stats (Attacking, Defending, Counter, Offside, FK, Corner, Penalty,
-          Teamplay, Understanding, Morale)
-        - uzima u obzir stil igre (Mixed / Continental / Longballs) i njihov RPS odnos
+        - sve glavne atribute igrača (Q, Kp, Tk, Pa, Sh, He, Sp, St, Pe, Bc)
+        - team stats (Attacking, Defending, Counter, Offside, FK, Corner, Penalty,
+          Teamplay, Understanding)
+        - stil igre (Mixed / Continental / Longballs) i njihov RPS odnos
         - formacija vs formacija (4-4-2 vs 3-5-2 itd.)
         - prednost domaćeg terena
+        - taktički pressure (Attacking / Normal / Defending / Counter-attacking)
 
-        Unesi svoje i protivnikove igrače, formaciju, stil i stats, pa pokreni simulacije.
+        Unesi svoje i protivnikove atribute, pa pokreni simulacije.
         """
     )
 
@@ -419,17 +428,17 @@ def main():
     with colB:
         team_b = build_team_ui("Protivnik")
 
-    n_matches = st.slider("Broj simulacija", 50, 2000, 500, step=50)
+    n_matches = st.number_input("Broj simulacija", 50, 5000, 500, step=50)
 
     if st.button("Pokreni simulacije"):
-        if len(team_a.players) != 11 or len(team_b.players) != 11:
-            st.error("Oba tima moraju imati TAČNO 11 igrača.")
+        if len(team_a.players) != len(team_b.players) or len(team_a.players) == 0:
+            st.error("Oba tima moraju imati validan broj igrača za izabranu formaciju.")
             return
 
-        win_a, draw, win_b = simulate_series(team_a, team_b, n_matches=n_matches)
+        win_a, draw, win_b = simulate_series(team_a, team_b, n_matches=int(n_matches))
 
         st.subheader("Rezultati")
-        st.write(f"Simulirano mečeva: {n_matches}")
+        st.write(f"Simulirano mečeva: {int(n_matches)}")
         col1, col2, col3 = st.columns(3)
         col1.metric(f"Pobede {team_a.name}", f"{win_a:.1f} %")
         col2.metric("Nerešeno", f"{draw:.1f} %")
