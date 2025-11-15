@@ -116,7 +116,7 @@ def parse_players_block(text: str) -> List[Player]:
 
 def style_match_bonus(my_style: str, opp_style: str) -> float:
     """
-    RPS logika:
+    Rock-paper-scissors logika:
       Longballs > Continental
       Continental > Mixed
       Mixed > Longballs
@@ -145,7 +145,7 @@ def style_match_bonus(my_style: str, opp_style: str) -> float:
     return 0.0
 
 
-# gruba tabela ko koga voli po formaciji – možeš kasnije da proširiš
+# Gruba tabela ko koga voli po formaciji – lako se proširi
 FORMATION_MATCHUPS = {
     ("4-4-2", "3-5-2"):  +1.0,
     ("3-5-2", "4-4-2"):  -1.0,
@@ -396,18 +396,20 @@ def build_team_ui(side: str) -> Team:
 
 
 def main():
-    st.title("ManagerLeague – taktički simulator (fan made)")
+    st.title("ManagerLeague – taktički simulator (fan-made)")
 
     st.markdown(
         """
         Ovo NIJE zvanični ML engine, ali:
+
         - koristi sve glavne atribute igrača (Q, Kp, Tk, Pa, Sh, He, Sp, St, Pe, Bc)
-        - koristi team stats (Attacking, Defending, Counter, Offside, FK, Corner, Penalty, Teamplay, Understanding, Morale)
+        - koristi team stats (Attacking, Defending, Counter, Offside, FK, Corner, Penalty,
+          Teamplay, Understanding, Morale)
         - uzima u obzir stil igre (Mixed / Continental / Longballs) i njihov RPS odnos
         - formacija vs formacija (4-4-2 vs 3-5-2 itd.)
         - prednost domaćeg terena
 
-        Možeš da upoređuješ bilo koje dve postave i vidiš procenat pobeda / nerešenih / poraza.
+        Unesi svoje i protivnikove igrače, formaciju, stil i stats, pa pokreni simulacije.
         """
     )
 
