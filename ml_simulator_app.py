@@ -414,7 +414,7 @@ def build_team(side: str) -> Team:
     if squad and order_key not in st.session_state:
         st.session_state[order_key] = list(range(len(squad)))
 
-    # taktički deo (sa key da Save/Load može da ih menja)
+    # taktički deo
     st.subheader(f"{side} – Taktika")
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -446,12 +446,11 @@ def build_team(side: str) -> Team:
 
         order = st.session_state.get(order_key, list(range(len(squad))))
 
-        # header – smanjen razmak atributa (0.75 umesto 0.9)
-    cols = st.columns(
-    [0.5, 1.2, 1.2, 1.3, 2.0,
-     0.70, 0.70, 0.70, 0.70, 0.70, 0.70, 0.70, 0.70, 0.70, 0.70]
-)
-
+        # HEADER – nove širine kolona
+        cols = st.columns(
+            [0.5, 1.2, 1.2, 1.3, 2.0,
+             0.70, 0.70, 0.70, 0.70, 0.70, 0.70, 0.70, 0.70, 0.70, 0.70]
+        )
         headers = ["XI", "Uloga", "Poz.", "SA", "Name",
                    "Q", "Kp", "Tk", "Pa", "Sh", "He", "Sp", "St", "Pe", "Bc"]
         for c, h in zip(cols, headers):
@@ -463,10 +462,10 @@ def build_team(side: str) -> Team:
             pl = squad[idx]
             key_prefix = f"{side}_pl_{idx}"
 
-        cols = st.columns(
-       [0.5, 1.2, 1.2, 1.3, 2.0,
-        0.70, 0.70, 0.70, 0.70, 0.70, 0.70, 0.70, 0.70, 0.70, 0.70]
-)
+            cols = st.columns(
+                [0.5, 1.2, 1.2, 1.3, 2.0,
+                 0.70, 0.70, 0.70, 0.70, 0.70, 0.70, 0.70, 0.70, 0.70, 0.70]
+            )
 
             # XI checkbox
             with cols[0]:
@@ -521,17 +520,18 @@ def build_team(side: str) -> Team:
             else:
                 color = "#e0e0e0"
 
-        with cols[4]:
-        st.markdown(
-        f"<div style='background-color:{color};"
-        f"padding:1px 4px;border-radius:4px;color:black;"
-        f"font-size:11px; white-space:nowrap;"
-        f"overflow:hidden; text-overflow:ellipsis;'>"
-        f"{pl['name']}</div>",
-        unsafe_allow_html=True,
-        )
+            # IME – manji font, uži badge
+            with cols[4]:
+                st.markdown(
+                    f"<div style='background-color:{color};"
+                    f"padding:1px 4px;border-radius:4px;color:black;"
+                    f"font-size:11px; white-space:nowrap;"
+                    f"overflow:hidden; text-overflow:ellipsis;'>"
+                    f"{pl['name']}</div>",
+                    unsafe_allow_html=True,
+                )
 
-            # atributi (sa smanjenom širinom kolona)
+            # ATRIBUTI
             with cols[5]:
                 q = st.number_input(
                     "",
@@ -560,7 +560,7 @@ def build_team(side: str) -> Team:
             with cols[14]:
                 bc = st.number_input("", 0, 100, int(pl["bc"]), key=f"{key_prefix}_bc")
 
-            # upiši u players listu ako je u startnih 11
+            # dodaj u players ako je starter
             if use:
                 players.append(
                     Player(
@@ -582,7 +582,7 @@ def build_team(side: str) -> Team:
                     )
                 )
 
-            # zapamti kompletno stanje za ovaj idx (za Save formacije)
+            # zapamti stanje za slot formacije
             ui_state[idx] = {
                 "use": use,
                 "role": role,
@@ -600,7 +600,7 @@ def build_team(side: str) -> Team:
                 "bc": float(bc),
             }
 
-        # DUGME "POREDJAJ TIM" – POSLE SPISKA IGRAČA
+        # Poredjaj tim
         if st.button("Poređaj tim", key=f"{side}_sort"):
             order = st.session_state.get(order_key, list(range(len(squad))))
             xi, bench = [], []
@@ -610,10 +610,9 @@ def build_team(side: str) -> Team:
             st.session_state[order_key] = xi + bench
             st.experimental_rerun()
 
-        # SAVE / LOAD FORMACIJE – SAMO ZA "Ja"
+        # SAVE / LOAD FORMCIJA – samo za "Ja"
         if side == "Ja":
             st.subheader("Sačuvane formacije (Ja)")
-
             for slot in [1, 2, 3]:
                 coln1, coln2, coln3 = st.columns([2.5, 1, 1])
                 slot_name_key = f"{side}_slot{slot}_name"
@@ -644,7 +643,6 @@ def build_team(side: str) -> Team:
                         if not data:
                             st.warning(f"Slot {slot} je prazan.")
                         else:
-                            # vrati taktičke postavke
                             st.session_state[f"{side}_formation"] = data["formation"]
                             st.session_state[f"{side}_style"] = data["style"]
                             st.session_state[f"{side}_pressure"] = data["pressure"]
