@@ -2,10 +2,10 @@ import math
 import random
 import re
 from dataclasses import dataclass
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Optional
 
-import requests
 import streamlit as st
+import requests
 
 # ============================
 #   MODELI
@@ -13,7 +13,7 @@ import streamlit as st
 
 @dataclass
 class Player:
-    position: str  # GK, DL, DC, DR, ML, MC, MR, ST ...
+    position: str  # GK, DL, DC, DR, ML, MC, MR, ST, ...
     role: str      # Gk, Def, Mid, Att (za engine)
     q: float
     kp: float
@@ -51,26 +51,19 @@ class Team:
     home: bool
 
 
-@dataclass
-class PlayerSlot:
-    position: str
-    url: str
-
-
-@dataclass
-class TeamInput:
-    name: str
-    formation: str
-    style: str
-    pressure: str
-    stats: TeamStats
-    home: bool
-    slots: List[PlayerSlot]
-
-
 # ============================
-#   POMOĆNE FUNKCIJE
+#   HELPERI
 # ============================
+
+POS_OPTIONS = [
+    "GK",
+    "DL", "DC", "DCL", "DCR", "DR",
+    "DML", "DMC", "DMR",
+    "ML", "MCL", "MCR", "MR",
+    "AML", "AMC", "AMR",
+    "STL", "STR", "ST",
+]
+
 
 def formation_to_lines(formation: str) -> Tuple[int, int, int]:
     """4-4-2 -> (4,4,2) itd."""
@@ -94,77 +87,59 @@ def pos_to_role(pos: str) -> str:
         return "Def"
     if pos.startswith("M"):
         return "Mid"
-    if pos.startswith("A") or pos.startswith("S"):  # AM, ST
+    if pos.startswith("A") or pos.startswith("S"):
         return "Att"
     return "Mid"
 
 
 # ============================
-#   UČITAVANJE IGRAČA SA LINKA
+#   SCRAPER ZA PLAYER LINK
 # ============================
 
-ATTR_LABELS = [
-    ("Q", "q"),
-    ("Kp", "kp"),
-    ("Tk", "tk"),
-    ("Pa", "pa"),
-    ("Sh", "sh"),
-    ("He", "he"),
-    ("Sp", "sp"),
-    ("St", "st"),
-    ("Pe", "pe"),
-    ("Bc", "bc"),
-]
-
-
-def _extract_attr(text: str, label: str) -> float:
+def scrape_player_from_url(url: str) -> Optional[Dict[str, float]]:
     """
-    Pokušava da nađe npr. 'Q 96', 'Q: 96', 'Q=96' u tekstu HTML stranice.
-    Ako ne nađe, baca ValueError.
+    Pokušava da sa player stranice izvuče Q, Kp, Tk, Pa, Sh, He, Sp, St, Pe, Bc.
+    Radi bez login-a, samo preko običnog GET-a i regexa nad tekstom stranice.
+    Ako propadne, vraća None.
     """
-    # normalizuj whitespace
-    t = re.sub(r"\s+", " ", text)
-
-    # prvo probaj label + :/=/space + broj
-    m = re.search(rf"{label}\s*[:=]?\s*([0-9]{{1,3}})", t)
-    if m:
-        return float(m.group(1))
-
-    # fallback: label, pa u narednih par karaktera broj
-    m = re.search(rf"{label}[^\d]{{0,5}}([0-9]{{1,3}})", t)
-    if m:
-        return float(m.group(1))
-
-    raise ValueError(f"Nije pronađen atribut {label} u tekstu")
-
-
-def load_player_from_url(url: str) -> Dict[str, float]:
-    """
-    Vraća dict sa ključevima q,kp,tk,pa,sh,he,sp,st,pe,bc.
-    Ako nešto ne uspe, baca ValueError.
-    """
-    if not url:
-        raise ValueError("Prazan URL")
+    if not url.strip():
+        return None
 
     try:
-        resp = requests.get(url, timeout=10)
-    except Exception as e:
-        raise ValueError(f"Ne mogu da dohvatim URL: {e}")
+        resp = requests.get(url.strip(), timeout=8)
+        resp.raise_for_status()
+    except Exception:
+        return None
 
-    if resp.status_code != 200:
-        raise ValueError(f"HTTP kod {resp.status_code}")
-
+    # Ukloni HTML tagove, ostavi samo tekst
     text = resp.text
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\s+", " ", text)
 
-    attrs: Dict[str, float] = {}
-    for label, key in ATTR_LABELS:
-        try:
-            attrs[key] = _extract_attr(text, label)
-        except ValueError:
-            # ako jedan atribut fali, obori sve – bolje nego polovično
-            raise ValueError(f"Nisam uspeo da pročitam {label} sa stranice.")
+    def find(label: str, default: float = 80.0) -> float:
+        # traži npr. "Kp 78", "Kp: 78" ili "Kp=78"
+        pattern = rf"{label}\s*[:=]?\s*([0-9]{{1,3}})"
+        m = re.search(pattern, text, flags=re.IGNORECASE)
+        if m:
+            try:
+                return float(m.group(1))
+            except ValueError:
+                return default
+        return default
 
-    return attrs
+    data = {
+        "q":  find("Q", 90.0),
+        "kp": find("Kp", 80.0),
+        "tk": find("Tk", 80.0),
+        "pa": find("Pa", 80.0),
+        "sh": find("Sh", 80.0),
+        "he": find("He", 80.0),
+        "sp": find("Sp", 80.0),
+        "st": find("St", 80.0),
+        "pe": find("Pe", 80.0),
+        "bc": find("Bc", 80.0),
+    }
+    return data
 
 
 # ============================
@@ -344,20 +319,9 @@ def simulate_series(team_a: Team, team_b: Team, n_matches: int) -> Tuple[float, 
         scores
     )
 
-
 # ============================
 #   UI – TIM / SASTAV / STATS
 # ============================
-
-POS_OPTIONS = [
-    "GK",
-    "DL", "DC", "DR",
-    "DML", "DMC", "DMR",
-    "ML", "MC", "MR",
-    "AML", "AMC", "AMR",
-    "STL", "STR", "ST",
-]
-
 
 def inputs_for_team_stats(prefix: str) -> TeamStats:
     st.subheader(f"{prefix} – Team stats (0–100)")
@@ -384,39 +348,79 @@ def inputs_for_team_stats(prefix: str) -> TeamStats:
     )
 
 
-def inputs_for_line_urls(side: str, label: str, count: int, default_pos_list: List[str], start_index: int) -> List[PlayerSlot]:
-    slots: List[PlayerSlot] = []
+def inputs_for_line(side: str, label: str, count: int, default_pos_list: List[str], start_index: int) -> List[Player]:
+    """
+    Jedan horizontalni red na terenu (GK / odbrana / vezni / napad).
+    Za svakog igrača:
+      - polje za link (opciono) + dugme "Učitaj iz linka"
+      - dropdown pozicija
+      - numerički atributi
+    """
+    players: List[Player] = []
     if count <= 0:
-        return slots
+        return players
 
     st.markdown(f"**{side} – {label} ({count})**")
     cols = st.columns(count)
 
     for i in range(count):
         with cols[i]:
+            idx = start_index + i
+            key_prefix = f"{side}_{label}_{idx}"
+
             pos_default = default_pos_list[i] if i < len(default_pos_list) else default_pos_list[-1]
             if pos_default in POS_OPTIONS:
                 default_index = POS_OPTIONS.index(pos_default)
             else:
                 default_index = 0
+
             pos = st.selectbox(
                 "Pozicija",
                 POS_OPTIONS,
                 index=default_index,
-                key=f"{side}_{label}_pos_{start_index+i}"
+                key=f"{key_prefix}_pos"
             )
-            url = st.text_input(
-                "Player URL",
-                value="",
-                key=f"{side}_{label}_url_{start_index+i}"
-            )
-            slots.append(PlayerSlot(position=pos, url=url))
+
+            # URL za igrača
+            url = st.text_input("Link igrača (opciono)", key=f"{key_prefix}_url")
+
+            # dugme za učitavanje
+            if st.button("Učitaj iz linka", key=f"{key_prefix}_load"):
+                data = scrape_player_from_url(url)
+                if data:
+                    for field, val in data.items():
+                        st.session_state[f"{key_prefix}_{field}"] = float(val)
+                else:
+                    st.warning("Nisam uspeo da pročitam atribute sa linka.")
+
+            # atributi – čitaju se iz session_state ako postoje
+            def get_val(field: str, default: float) -> float:
+                return float(st.session_state.get(f"{key_prefix}_{field}", default))
+
+            q  = st.number_input("Q", 0, 100, int(get_val("q", 95.0)), key=f"{key_prefix}_q")
+            kp = st.number_input("Kp", 0, 100, int(get_val("kp", 80.0)), key=f"{key_prefix}_kp")
+            tk = st.number_input("Tk", 0, 100, int(get_val("tk", 80.0)), key=f"{key_prefix}_tk")
+            pa = st.number_input("Pa", 0, 100, int(get_val("pa", 80.0)), key=f"{key_prefix}_pa")
+            sh = st.number_input("Sh", 0, 100, int(get_val("sh", 80.0)), key=f"{key_prefix}_sh")
+            he = st.number_input("He", 0, 100, int(get_val("he", 80.0)), key=f"{key_prefix}_he")
+            sp = st.number_input("Sp", 0, 100, int(get_val("sp", 80.0)), key=f"{key_prefix}_sp")
+            stg = st.number_input("St", 0, 100, int(get_val("st", 80.0)), key=f"{key_prefix}_st")
+            pe = st.number_input("Pe", 0, 100, int(get_val("pe", 80.0)), key=f"{key_prefix}_pe")
+            bc = st.number_input("Bc", 0, 100, int(get_val("bc", 80.0)), key=f"{key_prefix}_bc")
+
+            role = pos_to_role(pos)
+            players.append(Player(
+                position=pos,
+                role=role,
+                q=q, kp=kp, tk=tk, pa=pa, sh=sh,
+                he=he, sp=sp, st=stg, pe=pe, bc=bc
+            ))
 
     st.markdown("---")
-    return slots
+    return players
 
 
-def build_team_input(side: str) -> TeamInput:
+def build_team(side: str) -> Team:
     st.header(f"Tim: {side}")
 
     # TIM
@@ -444,89 +448,62 @@ def build_team_input(side: str) -> TeamInput:
             index=0,
         )
 
-    # SASTAV – vizuelni teren sa URL-ovima
-    st.subheader(f"{side} – Sastav (pozicija + URL igrača)")
+    # SASTAV – vizuelni teren
+    st.subheader(f"{side} – Sastav na terenu")
+
     d_count, m_count, a_count = formation_to_lines(formation)
 
-    gk_slots = inputs_for_line_urls(side, "GK", 1, ["GK"], 0)
+    # GK red
+    gk_players = inputs_for_line(
+        side, "GK", 1, ["GK"], 0
+    )
 
-    def_defaults = ["DL"] + ["DC"] * max(0, d_count - 2) + (["DR"] if d_count >= 2 else [])
-    if not def_defaults:
-        def_defaults = ["DC"]
-    def_slots = inputs_for_line_urls(side, "Odbrana", d_count, def_defaults, 1)
+    # DEF red
+    if d_count >= 2:
+        def_defaults = ["DL"] + ["DC"] * (d_count - 2) + ["DR"]
+    else:
+        def_defaults = ["DC"] * d_count
+    def_players = inputs_for_line(
+        side, "Odbrana", d_count, def_defaults, 1
+    )
 
+    # MID red
     if m_count == 5:
-        mid_defaults = ["ML", "MC", "MC", "MC", "MR"]
+        mid_defaults = ["ML", "MCL", "MC", "MCR", "MR"]
     elif m_count == 3:
         mid_defaults = ["ML", "MC", "MR"]
+    elif m_count >= 2:
+        mid_defaults = ["ML"] + ["MC"] * (m_count - 2) + ["MR"]
     else:
-        mid_defaults = ["ML"] + ["MC"] * max(0, m_count - 2) + (["MR"] if m_count >= 2 else [])
-        if not mid_defaults:
-            mid_defaults = ["MC"]
-    mid_slots = inputs_for_line_urls(side, "Vezni red", m_count, mid_defaults, 1 + d_count)
+        mid_defaults = ["MC"] * m_count
+    mid_players = inputs_for_line(
+        side, "Vezni red", m_count, mid_defaults, 1 + d_count
+    )
 
+    # ATT red
     if a_count == 1:
         att_defaults = ["ST"]
+    elif a_count == 2:
+        att_defaults = ["STL", "STR"]
     else:
-        att_defaults = ["STL", "STR"] + ["ST"] * max(0, a_count - 2)
-    att_slots = inputs_for_line_urls(side, "Napad", a_count, att_defaults, 1 + d_count + m_count)
+        att_defaults = ["STL", "STR"] + ["ST"] * (a_count - 2)
+    att_players = inputs_for_line(
+        side, "Napad", a_count, att_defaults, 1 + d_count + m_count
+    )
 
-    slots = gk_slots + def_slots + mid_slots + att_slots
+    players = gk_players + def_players + mid_players + att_players
 
     # STATS
     stats = inputs_for_team_stats(side)
 
-    return TeamInput(
+    return Team(
         name=name,
+        players=players,
         formation=formation,
         style=style,
         pressure=pressure,
         stats=stats,
         home=False,
-        slots=slots,
-    )
-
-
-def build_team_from_input(inp: TeamInput) -> Team:
-    players: List[Player] = []
-    errors: List[str] = []
-
-    for idx, slot in enumerate(inp.slots):
-        if not slot.url:
-            errors.append(f"Slot {idx+1} ({slot.position}): nema URL-a.")
-            continue
-        try:
-            attrs = load_player_from_url(slot.url)
-        except ValueError as e:
-            errors.append(f"{slot.position}: {e}")
-            continue
-
-        players.append(Player(
-            position=slot.position,
-            role=pos_to_role(slot.position),
-            q=attrs["q"],
-            kp=attrs["kp"],
-            tk=attrs["tk"],
-            pa=attrs["pa"],
-            sh=attrs["sh"],
-            he=attrs["he"],
-            sp=attrs["sp"],
-            st=attrs["st"],
-            pe=attrs["pe"],
-            bc=attrs["bc"],
-        ))
-
-    if errors:
-        st.error("Greške pri čitanju igrača:\n" + "\n".join(errors))
-
-    return Team(
-        name=inp.name,
-        players=players,
-        formation=inp.formation,
-        style=inp.style,
-        pressure=inp.pressure,
-        stats=inp.stats,
-        home=inp.home,
     )
 
 
@@ -536,19 +513,6 @@ def build_team_from_input(inp: TeamInput) -> Team:
 
 def main():
     st.title("ManagerLeague – taktički simulator (fan-made)")
-
-    st.markdown(
-        """
-        **Raspored:**
-        1. Odaberi teren (neutralno / domaćin).
-        2. Za svaki tim: Tim → Taktika → Sastav (pozicija + URL) → Team stats.
-        3. Pokreni simulaciju i dobiješ procente + 5 najčešćih rezultata.
-
-        U polje *Player URL* ubaciš link tipa  
-        `https://football.managerleague.com/ml/player/87277941?ref=569380`  
-        i simulator će pokušati da pročita Q, Kp, Tk, Pa, Sh, He, Sp, St, Pe, Bc iz stranice.
-        """
-    )
 
     # TEREN
     st.subheader("Teren")
@@ -561,29 +525,26 @@ def main():
 
     colA, colB = st.columns(2)
     with colA:
-        team_inp_a = build_team_input("Ja")
+        team_a = build_team("Ja")
     with colB:
-        team_inp_b = build_team_input("Protivnik")
+        team_b = build_team("Protivnik")
 
     if ground == "Neutralno":
-        team_inp_a.home = False
-        team_inp_b.home = False
+        team_a.home = False
+        team_b.home = False
     elif ground == "Ja sam domaćin":
-        team_inp_a.home = True
-        team_inp_b.home = False
+        team_a.home = True
+        team_b.home = False
     else:
-        team_inp_a.home = False
-        team_inp_b.home = True
+        team_a.home = False
+        team_b.home = True
 
     st.subheader("Simulacija")
     n_matches = st.number_input("Broj simulacija", 50, 5000, 500, step=50)
 
     if st.button("Pokreni simulacije"):
-        team_a = build_team_from_input(team_inp_a)
-        team_b = build_team_from_input(team_inp_b)
-
-        if not team_a.players or not team_b.players:
-            st.error("Moraš imati bar jednog validnog igrača u oba tima.")
+        if len(team_a.players) == 0 or len(team_b.players) == 0:
+            st.error("Moraš da uneseš igrače za oba tima.")
             return
 
         win_a, draw, win_b, scores = simulate_series(team_a, team_b, int(n_matches))
