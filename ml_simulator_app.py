@@ -16,7 +16,7 @@ class Player:
     name: str
     age: int
     position: str  # GK, DL, DC, DR, ML, MC, MR, ST...
-    role: str      # Gk, Def, Mid, Att (za engine)
+    role: str      # Gk, Def, Mid, Att
     q: float
     kp: float
     tk: float
@@ -80,15 +80,22 @@ def pos_to_role(pos: str) -> str:
     return "Mid"
 
 
+ROLE_COLOR = {
+    "Gk": "#4da3ff",   # plavo
+    "Def": "#4caf50",  # zeleno
+    "Mid": "#ffd54f",  # žuto
+    "Att": "#ef5350",  # crveno
+}
+
+
 # ============================
-#   SCRAPER ZA ml-club.eu / ML
+#   SCRAPER ZA ml-club / ML
 # ============================
 
 def scrape_team_from_ml_club(url: str) -> List[Dict[str, float]]:
     """
-    Prima link sa ml-club.eu ili ML team link (pretvara ga).
-    Vraća listu dict-ova:
-      { 'age','name','q','kp','tk','pa','sh','he','sp','st','pe','bc' }
+    Prima ml-club link ili ML team link i vraća listu igrača
+    { age,name,q,kp,tk,pa,sh,he,sp,st,pe,bc }
     """
     players: List[Dict[str, float]] = []
     if not url.strip():
@@ -96,7 +103,7 @@ def scrape_team_from_ml_club(url: str) -> List[Dict[str, float]]:
 
     url = url.strip()
 
-    # ako je ML link, npr https://football.managerleague.com/ml/team/118270
+    # npr. https://football.managerleague.com/ml/team/118270
     m = re.search(r"/team/(\d+)", url)
     if "football.managerleague.com" in url and m:
         team_id = m.group(1)
@@ -119,8 +126,6 @@ def scrape_team_from_ml_club(url: str) -> List[Dict[str, float]]:
 
     body = text[idx + len(header):]
 
-    # primer reda:
-    # 31 Predrag Rajković 96.250 98 79 86 71 74 97 94 96 95 89.513 93 4
     row_pattern = re.compile(
         r"(\d+)\s+([^\d]+?)\s+([\d.]+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)",
         re.UNICODE
@@ -203,20 +208,15 @@ def average_q(team: Team) -> float:
 
 
 def compute_line_ratings(team: Team) -> Tuple[float, float]:
-    """
-    Vraća (attack_rating, defense_rating).
-    U obzir uzima Q + atribute + poziciju + team stats + stil + pressure + home.
-    """
     base_q = average_q(team)
     atk_raw = 0.0
     def_raw = 0.0
 
     for p in team.players:
-        role = p.role.lower()
+        role = p.role
         pos = p.position.upper()
 
-        # bazne težine po ulozi
-        if role == "att":
+        if role == "Att":
             atk = (
                 0.35 * p.sh +
                 0.25 * p.pa +
@@ -226,7 +226,7 @@ def compute_line_ratings(team: Team) -> Tuple[float, float]:
                 0.10 * p.q
             )
             deff = 0.15 * p.tk + 0.10 * p.bc + 0.05 * p.st
-        elif role == "mid":
+        elif role == "Mid":
             atk = (
                 0.25 * p.sh +
                 0.30 * p.pa +
@@ -236,7 +236,7 @@ def compute_line_ratings(team: Team) -> Tuple[float, float]:
                 0.05 * p.q
             )
             deff = 0.25 * p.tk + 0.10 * p.bc + 0.05 * p.st
-        elif role == "def":
+        elif role == "Def":
             deff = (
                 0.35 * p.tk +
                 0.20 * p.he +
@@ -318,6 +318,30 @@ def compute_effective_strengths(team_a: Team, team_b: Team) -> Tuple[float, floa
     def_b += style_bonus_b * 0.3 + form_bonus_b * 0.3
 
     return atk_a, def_a, atk_b, def_b
+
+
+def style_match_bonus(my_style: str, opp_style: str) -> float:
+    my = my_style.lower()
+    op = opp_style.lower()
+    if my == op:
+        return 0.0
+    if my == "longballs" and op == "continental":
+        return +2.0
+    if my == "continental" and op == "mixed":
+        return +2.0
+    if my == "mixed" and op == "longballs":
+        return +2.0
+    if op == "longballs" and my == "continental":
+        return -2.0
+    if op == "continental" and my == "mixed":
+        return -2.0
+    if op == "mixed" and my == "longballs":
+        return -2.0
+    return 0.0
+
+
+def formation_match_bonus(my_form: str, opp_form: str) -> float:
+    return FORMATION_MATCHUPS.get((my_form, opp_form), 0.0)
 
 
 def poisson_sample(lmbda: float) -> int:
@@ -437,99 +461,81 @@ def build_team(side: str) -> Team:
     if squad:
         st.subheader(f"{side} – sastav (čekiraj 11 igrača za simulaciju)")
 
-        # header red, kao ml-club
-        cols = st.columns([0.6, 0.8, 0.7, 2.0, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7])
+        # header red
+        cols = st.columns([0.6, 0.9, 0.7, 2.0, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7])
         headers = ["XI", "Poz.", "Age", "Name", "Q", "Kp", "Tk", "Pa", "Sh", "He", "Sp", "St", "Pe", "Bc"]
         for c, h in zip(cols, headers):
             c.write(f"**{h}**")
 
         for idx, pl in enumerate(squad):
             key_prefix = f"{side}_pl_{idx}"
-            cols = st.columns([0.6, 0.8, 0.7, 2.0, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7])
+            cols = st.columns([0.6, 0.9, 0.7, 2.0, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7])
 
             with cols[0]:
-                # svi čekirani po difoltu; ti odčekiraš klupu
                 use = st.checkbox("", value=True, key=f"{key_prefix}_use")
 
+            # --- Pozicija (fiks za index / state) ---
+            pos_key = f"{key_prefix}_pos"
             with cols[1]:
-                # gruba pretpostavka: 1. igrač GK, sledeća 4 def, ostalo mid
-                if idx == 0:
-                    pos_default = "GK"
-                elif 1 <= idx <= 4:
-                    pos_default = "DC"
+                if pos_key in st.session_state:
+                    # već je birao – pusti Streamlit da zadrži vrednost
+                    pos = st.selectbox("", POS_OPTIONS, key=pos_key)
                 else:
-                    pos_default = "MC"
-                if pos_default in POS_OPTIONS:
-                    default_index = POS_OPTIONS.index(pos_default)
-                else:
-                    default_index = 0
+                    # prvi put – postavi default index
+                    if idx == 0:
+                        pos_default = "GK"
+                    elif 1 <= idx <= 4:
+                        pos_default = "DC"
+                    else:
+                        pos_default = "MC"
+                    if pos_default in POS_OPTIONS:
+                        default_index = POS_OPTIONS.index(pos_default)
+                    else:
+                        default_index = 0
+                    pos = st.selectbox(
+                        "",
+                        POS_OPTIONS,
+                        index=default_index,
+                        key=pos_key,
+                    )
 
-                pos = st.selectbox(
-                    "",
-                    POS_OPTIONS,
-                    index=default_index,
-                    key=f"{key_prefix}_pos",
-                )
+            role = pos_to_role(pos)
+            color = ROLE_COLOR.get(role, "#dddddd")
 
             with cols[2]:
                 st.write(int(pl["age"]))
 
             with cols[3]:
-                st.write(pl["name"])
+                # ime na obojenoj pozadini
+                st.markdown(
+                    f"<div style='background-color:{color};"
+                    f"padding:2px 6px;border-radius:4px;color:black;'>"
+                    f"{pl['name']}</div>",
+                    unsafe_allow_html=True,
+                )
 
             with cols[4]:
-                q = st.number_input(
-                    "", 0, 100, int(round(pl["q"])),
-                    key=f"{key_prefix}_q",
-                )
+                q = st.number_input("", 0, 100, int(round(pl["q"])), key=f"{key_prefix}_q")
             with cols[5]:
-                kp = st.number_input(
-                    "", 0, 100, int(pl["kp"]),
-                    key=f"{key_prefix}_kp",
-                )
+                kp = st.number_input("", 0, 100, int(pl["kp"]), key=f"{key_prefix}_kp")
             with cols[6]:
-                tk = st.number_input(
-                    "", 0, 100, int(pl["tk"]),
-                    key=f"{key_prefix}_tk",
-                )
+                tk = st.number_input("", 0, 100, int(pl["tk"]), key=f"{key_prefix}_tk")
             with cols[7]:
-                pa = st.number_input(
-                    "", 0, 100, int(pl["pa"]),
-                    key=f"{key_prefix}_pa",
-                )
+                pa = st.number_input("", 0, 100, int(pl["pa"]), key=f"{key_prefix}_pa")
             with cols[8]:
-                sh = st.number_input(
-                    "", 0, 100, int(pl["sh"]),
-                    key=f"{key_prefix}_sh",
-                )
+                sh = st.number_input("", 0, 100, int(pl["sh"]), key=f"{key_prefix}_sh")
             with cols[9]:
-                he = st.number_input(
-                    "", 0, 100, int(pl["he"]),
-                    key=f"{key_prefix}_he",
-                )
+                he = st.number_input("", 0, 100, int(pl["he"]), key=f"{key_prefix}_he")
             with cols[10]:
-                sp = st.number_input(
-                    "", 0, 100, int(pl["sp"]),
-                    key=f"{key_prefix}_sp",
-                )
+                sp = st.number_input("", 0, 100, int(pl["sp"]), key=f"{key_prefix}_sp")
             with cols[11]:
-                st_attr = st.number_input(
-                    "", 0, 100, int(pl["st"]),
-                    key=f"{key_prefix}_st",
-                )
+                st_attr = st.number_input("", 0, 100, int(pl["st"]), key=f"{key_prefix}_st")
             with cols[12]:
-                pe = st.number_input(
-                    "", 0, 100, int(pl["pe"]),
-                    key=f"{key_prefix}_pe",
-                )
+                pe = st.number_input("", 0, 100, int(pl["pe"]), key=f"{key_prefix}_pe")
             with cols[13]:
-                bc = st.number_input(
-                    "", 0, 100, int(pl["bc"]),
-                    key=f"{key_prefix}_bc",
-                )
+                bc = st.number_input("", 0, 100, int(pl["bc"]), key=f"{key_prefix}_bc")
 
             if use:
-                role = pos_to_role(pos)
                 players.append(
                     Player(
                         name=pl["name"],
@@ -581,10 +587,8 @@ def main():
         horizontal=True,
     )
 
-    # moj tim gore
     team_a = build_team("Ja")
     st.markdown("---")
-    # protivnik ispod
     team_b = build_team("Protivnik")
 
     if ground == "Neutralno":
