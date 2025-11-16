@@ -608,7 +608,7 @@ def build_team(side: str) -> Team:
                 use = st.session_state.get(f"{side}_pl_{idx}_use", True)
                 (xi if use else bench).append(idx)
             st.session_state[order_key] = xi + bench
-            st.experimental_rerun()
+            st.rerun()
 
         # SAVE / LOAD FORMCIJA – samo za "Ja"
         if side == "Ja":
@@ -665,7 +665,7 @@ def build_team(side: str) -> Team:
                                 st.session_state[f"{side}_pl_{idx2}_pe"] = int(vals["pe"])
                                 st.session_state[f"{side}_pl_{idx2}_bc"] = int(vals["bc"])
 
-                            st.experimental_rerun()
+                            st.rerun()
 
         st.markdown("---")
     else:
