@@ -423,7 +423,7 @@ def build_team(side: str) -> Team:
 
         # header
         cols = st.columns(
-            [0.5, 1.4, 1.8, 2.5,
+            [0.5, 1.3, 1.3, 2.4,
              0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9]
         )
         headers = ["XI", "Uloga", "Poz.", "Name",
@@ -436,7 +436,7 @@ def build_team(side: str) -> Team:
             key_prefix = f"{side}_pl_{idx}"
 
             cols = st.columns(
-                [0.5, 1.4, 1.8, 2.5,
+                [0.5, 1.3, 1.3, 2.4,
                  0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9]
             )
 
@@ -444,9 +444,8 @@ def build_team(side: str) -> Team:
             with cols[0]:
                 use = st.checkbox("", value=True, key=f"{key_prefix}_use")
 
-            # ===== ULOGA (select + tekst u istom redu) =====
+            # ULOGA – select + mali tekst ispod (uvijek vidiš šta je izabrano)
             with cols[1]:
-                sub1, sub2 = st.columns([2, 1])
                 if idx == 0:
                     default_role = "Gk"
                 elif 1 <= idx <= 4:
@@ -458,23 +457,24 @@ def build_team(side: str) -> Team:
                 role_key = f"{key_prefix}_role"
                 if role_key not in st.session_state:
                     st.session_state[role_key] = default_role
-                role = sub1.selectbox(
-                    "",
-                    ROLE_OPTIONS,
-                    key=role_key,
+                role = st.selectbox("", ROLE_OPTIONS, key=role_key)
+                st.markdown(
+                    f"<div style='font-size:11px;text-align:center'>{role}</div>",
+                    unsafe_allow_html=True,
                 )
-                sub2.write(role)
 
-            # ===== POZICIJA (select + tekst u istom redu) =====
+            # POZICIJA – select + mali tekst ispod
             with cols[2]:
                 pos_options = POS_BY_ROLE.get(role, ["GK"])
                 pos_key = f"{key_prefix}_pos"
                 if pos_key not in st.session_state or \
                    st.session_state[pos_key] not in pos_options:
                     st.session_state[pos_key] = pos_options[0]
-                pcol1, pcol2 = st.columns([2, 1])
-                position = pcol1.selectbox("", pos_options, key=pos_key)
-                pcol2.write(position)
+                position = st.selectbox("", pos_options, key=pos_key)
+                st.markdown(
+                    f"<div style='font-size:11px;text-align:center'>{position}</div>",
+                    unsafe_allow_html=True,
+                )
 
             # boja: samo startnih 11
             if use:
