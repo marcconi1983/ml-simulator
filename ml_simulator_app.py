@@ -61,11 +61,9 @@ ROLE_COLOR = {
     "Att": "#ef5350",  # crveno
 }
 
-# POZICIJE PO ULOZI
 POS_BY_ROLE = {
     "Gk": ["GK"],
     "Def": ["DC", "DCL", "DCR", "DL", "DR"],
-    # Mid kako si tražio: MC, MCL, MCR, ML, MR
     "Mid": ["MC", "MCL", "MCR", "ML", "MR"],
     "Att": ["ST", "STL", "STR"],
 }
@@ -75,14 +73,12 @@ POS_BY_ROLE = {
 # ============================
 
 def scrape_team_from_ml_club(url: str) -> List[Dict[str, float]]:
-    """Prima ml-club link ili ML team link i vraća listu igrača."""
     players: List[Dict[str, float]] = []
     if not url.strip():
         return players
 
     url = url.strip()
 
-    # npr. https://football.managerleague.com/ml/team/118270
     m = re.search(r"/team/(\d+)", url)
     if "football.managerleague.com" in url and m:
         team_id = m.group(1)
@@ -185,7 +181,6 @@ def average_q(team: Team) -> float:
 
 
 def compute_line_ratings(team: Team) -> Tuple[float, float]:
-    """Vraća (attack_rating, defense_rating)."""
     base_q = average_q(team)
     atk_raw = 0.0
     def_raw = 0.0
@@ -194,7 +189,6 @@ def compute_line_ratings(team: Team) -> Tuple[float, float]:
         role = p.role
         pos = p.position.upper()
 
-        # osnovno po ulozi
         if role == "Att":
             atk = (
                 0.35 * p.sh +
@@ -228,7 +222,6 @@ def compute_line_ratings(team: Team) -> Tuple[float, float]:
             deff = 0.40 * p.q + 0.15 * p.bc + 0.10 * p.st
             atk = 0.02 * p.pa
 
-        # fino po poziciji
         if pos in ("DL", "DR"):
             atk *= 1.05
             deff *= 0.97
@@ -390,7 +383,7 @@ def build_team(side: str) -> Team:
     if squad and order_key not in st.session_state:
         st.session_state[order_key] = list(range(len(squad)))
 
-    # Taktika
+    # taktički deo
     st.subheader(f"{side} – Taktika")
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -417,28 +410,23 @@ def build_team(side: str) -> Team:
     if squad:
         st.subheader(f"{side} – sastav (čekiraj 11 igrača za simulaciju)")
 
-        # Dugme "Poređaj tim": XI gore, klupa dole
+        # dugme za sortiranje (XI gore)
         if st.button("Poređaj tim", key=f"{side}_sort"):
             order = st.session_state.get(order_key, list(range(len(squad))))
-            xi = []
-            bench = []
+            xi, bench = [], []
             for idx in order:
-                use_key = f"{side}_pl_{idx}_use"
-                use = st.session_state.get(use_key, True)
-                if use:
-                    xi.append(idx)
-                else:
-                    bench.append(idx)
+                use = st.session_state.get(f"{side}_pl_{idx}_use", True)
+                (xi if use else bench).append(idx)
             st.session_state[order_key] = xi + bench
 
         order = st.session_state.get(order_key, list(range(len(squad))))
 
-        # tabela – bez Age, sve u jednom redu
+        # header
         cols = st.columns(
-            [0.5, 1.0, 1.3, 2.4,
+            [0.5, 1.4, 1.8, 2.5,
              0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9]
         )
-        headers = ["XI", "U", "Poz.", "Name",
+        headers = ["XI", "Uloga", "Poz.", "Name",
                    "Q", "Kp", "Tk", "Pa", "Sh", "He", "Sp", "St", "Pe", "Bc"]
         for c, h in zip(cols, headers):
             c.write(f"**{h}**")
@@ -446,16 +434,19 @@ def build_team(side: str) -> Team:
         for idx in order:
             pl = squad[idx]
             key_prefix = f"{side}_pl_{idx}"
+
             cols = st.columns(
-                [0.5, 1.0, 1.3, 2.4,
+                [0.5, 1.4, 1.8, 2.5,
                  0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9]
             )
 
+            # XI checkbox
             with cols[0]:
                 use = st.checkbox("", value=True, key=f"{key_prefix}_use")
 
-            # ---- Uloga ----
+            # ===== ULOGA (select + tekst u istom redu) =====
             with cols[1]:
+                sub1, sub2 = st.columns([2, 1])
                 if idx == 0:
                     default_role = "Gk"
                 elif 1 <= idx <= 4:
@@ -467,22 +458,25 @@ def build_team(side: str) -> Team:
                 role_key = f"{key_prefix}_role"
                 if role_key not in st.session_state:
                     st.session_state[role_key] = default_role
-                role = st.selectbox(
+                role = sub1.selectbox(
                     "",
                     ROLE_OPTIONS,
                     key=role_key,
                 )
+                sub2.write(role)
 
-            # ---- Pozicija ----
+            # ===== POZICIJA (select + tekst u istom redu) =====
             with cols[2]:
                 pos_options = POS_BY_ROLE.get(role, ["GK"])
                 pos_key = f"{key_prefix}_pos"
                 if pos_key not in st.session_state or \
                    st.session_state[pos_key] not in pos_options:
                     st.session_state[pos_key] = pos_options[0]
-                position = st.selectbox("", pos_options, key=pos_key)
+                pcol1, pcol2 = st.columns([2, 1])
+                position = pcol1.selectbox("", pos_options, key=pos_key)
+                pcol2.write(position)
 
-            # Boja samo za igrače u prvih 11 (use=True)
+            # boja: samo startnih 11
             if use:
                 color = ROLE_COLOR.get(role, "#dddddd")
             else:
@@ -496,7 +490,7 @@ def build_team(side: str) -> Team:
                     unsafe_allow_html=True,
                 )
 
-            # --- atributi (dvocifreno, centrirano) ---
+            # atributi
             with cols[4]:
                 q = st.number_input(
                     "",
@@ -569,7 +563,6 @@ def build_team(side: str) -> Team:
 def main():
     st.title("ManagerLeague – taktički simulator (ml-club import)")
 
-    # globalni CSS – manji font u numeričkim poljima, sve staje u jedan red
     st.markdown(
         """
         <style>
