@@ -13,8 +13,8 @@ import requests
 
 @dataclass
 class Player:
-    position: str  # GK, DL, DC, DR, ML, MC, MR, ST, ...
-    role: str      # Gk, Def, Mid, Att (za engine)
+    name: str
+    role: str      # Gk, Def, Mid, Att
     q: float
     kp: float
     tk: float
@@ -55,91 +55,88 @@ class Team:
 #   HELPERI
 # ============================
 
-POS_OPTIONS = [
-    "GK",
-    "DL", "DC", "DCL", "DCR", "DR",
-    "DML", "DMC", "DMR",
-    "ML", "MCL", "MCR", "MR",
-    "AML", "AMC", "AMR",
-    "STL", "STR", "ST",
-]
-
-
-def formation_to_lines(formation: str) -> Tuple[int, int, int]:
-    """4-4-2 -> (4,4,2) itd."""
-    parts = formation.split("-")
-    if len(parts) != 3:
-        return 4, 4, 2
-    try:
-        d = int(parts[0])
-        m = int(parts[1])
-        a = int(parts[2])
-        return d, m, a
-    except ValueError:
-        return 4, 4, 2
-
-
 def pos_to_role(pos: str) -> str:
-    pos = pos.upper()
-    if pos == "GK":
+    """Pretvori oznaku pozicije u ulogu za engine."""
+    pos = pos.lower()
+    if pos in ("gk",):
         return "Gk"
-    if pos.startswith("D"):
+    if pos.startswith("d"):
         return "Def"
-    if pos.startswith("M"):
+    if pos.startswith("m"):
         return "Mid"
-    if pos.startswith("A") or pos.startswith("S"):
+    if pos.startswith("a") or pos.startswith("s"):
         return "Att"
     return "Mid"
 
 
 # ============================
-#   SCRAPER ZA PLAYER LINK
+#   SCRAPER ZA ml-club.eu
 # ============================
 
-def scrape_player_from_url(url: str) -> Optional[Dict[str, float]]:
+def scrape_team_from_ml_club(url: str) -> List[Dict[str, float]]:
     """
-    Pokušava da sa player stranice izvuče Q, Kp, Tk, Pa, Sh, He, Sp, St, Pe, Bc.
-    Radi bez login-a, samo preko običnog GET-a i regexa nad tekstom stranice.
-    Ako propadne, vraća None.
+    Prima link sa ml-club.eu (npr. https://ml-club.eu/?team=118270%3A)
+    i vraća listu dict-ova:
+      { 'name', 'age', 'q','kp','tk','pa','sh','he','sp','st','pe','bc' }
     """
+    players: List[Dict[str, float]] = []
     if not url.strip():
-        return None
+        return players
 
     try:
-        resp = requests.get(url.strip(), timeout=8)
+        resp = requests.get(url.strip(), timeout=10)
         resp.raise_for_status()
     except Exception:
-        return None
+        return players
 
-    # Ukloni HTML tagove, ostavi samo tekst
+    # Skini HTML tagove, ostavi čist tekst
     text = resp.text
     text = re.sub(r"<[^>]+>", " ", text)
     text = re.sub(r"\s+", " ", text)
 
-    def find(label: str, default: float = 80.0) -> float:
-        # traži npr. "Kp 78", "Kp: 78" ili "Kp=78"
-        pattern = rf"{label}\s*[:=]?\s*([0-9]{{1,3}})"
-        m = re.search(pattern, text, flags=re.IGNORECASE)
-        if m:
-            try:
-                return float(m.group(1))
-            except ValueError:
-                return default
-        return default
+    header = "Age Name Q Kp Tk Pa Sh He Sp St Pe Bc"
+    idx = text.find(header)
+    if idx == -1:
+        return players
 
-    data = {
-        "q":  find("Q", 90.0),
-        "kp": find("Kp", 80.0),
-        "tk": find("Tk", 80.0),
-        "pa": find("Pa", 80.0),
-        "sh": find("Sh", 80.0),
-        "he": find("He", 80.0),
-        "sp": find("Sp", 80.0),
-        "st": find("St", 80.0),
-        "pe": find("Pe", 80.0),
-        "bc": find("Bc", 80.0),
-    }
-    return data
+    body = text[idx + len(header):]
+
+    # 31 Predrag Rajković 96.250 98 79 86 71 74 97 94 96 95 89.513 93 4
+    row_pattern = re.compile(
+        r"(\d+)\s+([^\d]+?)\s+([\d.]+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)",
+        re.UNICODE
+    )
+
+    for m in row_pattern.finditer(body):
+        age = int(m.group(1))
+        name = m.group(2).strip()
+        q = float(m.group(3))
+        kp = float(m.group(4))
+        tk = float(m.group(5))
+        pa = float(m.group(6))
+        sh = float(m.group(7))
+        he = float(m.group(8))
+        sp = float(m.group(9))
+        st_attr = float(m.group(10))
+        pe = float(m.group(11))
+        bc = float(m.group(12))
+
+        players.append({
+            "age": age,
+            "name": name,
+            "q": q,
+            "kp": kp,
+            "tk": tk,
+            "pa": pa,
+            "sh": sh,
+            "he": he,
+            "sp": sp,
+            "st": st_attr,
+            "pe": pe,
+            "bc": bc,
+        })
+
+    return players
 
 
 # ============================
@@ -299,9 +296,9 @@ def simulate_single_match(team_a: Team, team_b: Team) -> Tuple[int, int]:
     return goals_a, goals_b
 
 
-def simulate_series(team_a: Team, team_b: Team, n_matches: int) -> Tuple[float, float, float, Dict[Tuple[int,int], int]]:
+def simulate_series(team_a: Team, team_b: Team, n_matches: int) -> Tuple[float, float, float, Dict[Tuple[int, int], int]]:
     win_a = draw = win_b = 0
-    scores: Dict[Tuple[int,int], int] = {}
+    scores: Dict[Tuple[int, int], int] = {}
     for _ in range(n_matches):
         ga, gb = simulate_single_match(team_a, team_b)
         if ga > gb:
@@ -314,13 +311,13 @@ def simulate_series(team_a: Team, team_b: Team, n_matches: int) -> Tuple[float, 
 
     return (
         100 * win_a / n_matches,
-        100 * draw  / n_matches,
+        100 * draw / n_matches,
         100 * win_b / n_matches,
-        scores
+        scores,
     )
 
 # ============================
-#   UI – TIM / SASTAV / STATS
+#   UI – TEAM / STATS
 # ============================
 
 def inputs_for_team_stats(prefix: str) -> TeamStats:
@@ -348,85 +345,28 @@ def inputs_for_team_stats(prefix: str) -> TeamStats:
     )
 
 
-def inputs_for_line(side: str, label: str, count: int, default_pos_list: List[str], start_index: int) -> List[Player]:
-    """
-    Jedan horizontalni red na terenu (GK / odbrana / vezni / napad).
-    Za svakog igrača:
-      - polje za link (opciono) + dugme "Učitaj iz linka"
-      - dropdown pozicija
-      - numerički atributi
-    """
-    players: List[Player] = []
-    if count <= 0:
-        return players
-
-    st.markdown(f"**{side} – {label} ({count})**")
-    cols = st.columns(count)
-
-    for i in range(count):
-        with cols[i]:
-            idx = start_index + i
-            key_prefix = f"{side}_{label}_{idx}"
-
-            pos_default = default_pos_list[i] if i < len(default_pos_list) else default_pos_list[-1]
-            if pos_default in POS_OPTIONS:
-                default_index = POS_OPTIONS.index(pos_default)
-            else:
-                default_index = 0
-
-            pos = st.selectbox(
-                "Pozicija",
-                POS_OPTIONS,
-                index=default_index,
-                key=f"{key_prefix}_pos"
-            )
-
-            # URL za igrača
-            url = st.text_input("Link igrača (opciono)", key=f"{key_prefix}_url")
-
-            # dugme za učitavanje
-            if st.button("Učitaj iz linka", key=f"{key_prefix}_load"):
-                data = scrape_player_from_url(url)
-                if data:
-                    for field, val in data.items():
-                        st.session_state[f"{key_prefix}_{field}"] = float(val)
-                else:
-                    st.warning("Nisam uspeo da pročitam atribute sa linka.")
-
-            # atributi – čitaju se iz session_state ako postoje
-            def get_val(field: str, default: float) -> float:
-                return float(st.session_state.get(f"{key_prefix}_{field}", default))
-
-            q  = st.number_input("Q", 0, 100, int(get_val("q", 95.0)), key=f"{key_prefix}_q")
-            kp = st.number_input("Kp", 0, 100, int(get_val("kp", 80.0)), key=f"{key_prefix}_kp")
-            tk = st.number_input("Tk", 0, 100, int(get_val("tk", 80.0)), key=f"{key_prefix}_tk")
-            pa = st.number_input("Pa", 0, 100, int(get_val("pa", 80.0)), key=f"{key_prefix}_pa")
-            sh = st.number_input("Sh", 0, 100, int(get_val("sh", 80.0)), key=f"{key_prefix}_sh")
-            he = st.number_input("He", 0, 100, int(get_val("he", 80.0)), key=f"{key_prefix}_he")
-            sp = st.number_input("Sp", 0, 100, int(get_val("sp", 80.0)), key=f"{key_prefix}_sp")
-            stg = st.number_input("St", 0, 100, int(get_val("st", 80.0)), key=f"{key_prefix}_st")
-            pe = st.number_input("Pe", 0, 100, int(get_val("pe", 80.0)), key=f"{key_prefix}_pe")
-            bc = st.number_input("Bc", 0, 100, int(get_val("bc", 80.0)), key=f"{key_prefix}_bc")
-
-            role = pos_to_role(pos)
-            players.append(Player(
-                position=pos,
-                role=role,
-                q=q, kp=kp, tk=tk, pa=pa, sh=sh,
-                he=he, sp=sp, st=stg, pe=pe, bc=bc
-            ))
-
-    st.markdown("---")
-    return players
-
-
 def build_team(side: str) -> Team:
     st.header(f"Tim: {side}")
 
-    # TIM
     name = st.text_input(f"{side} – ime tima", value=side)
 
-    # TAKTIKA
+    # Link ka ml-club.eu
+    team_url = st.text_input(
+        f"{side} – ml-club link tima",
+        help="Npr. https://ml-club.eu/?team=118270%3A",
+        key=f"{side}_url",
+    )
+
+    if st.button(f"Učitaj tim sa ml-club.eu", key=f"{side}_load"):
+        squad = scrape_team_from_ml_club(team_url)
+        if not squad:
+            st.warning("Nisam uspeo da učitam tim sa datog linka.")
+        else:
+            st.session_state[f"{side}_squad"] = squad
+
+    squad = st.session_state.get(f"{side}_squad", [])
+
+    # Taktika
     st.subheader(f"{side} – Taktika")
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -448,52 +388,100 @@ def build_team(side: str) -> Team:
             index=0,
         )
 
-    # SASTAV – vizuelni teren
-    st.subheader(f"{side} – Sastav na terenu")
+    players: List[Player] = []
 
-    d_count, m_count, a_count = formation_to_lines(formation)
+    if squad:
+        st.subheader(f"{side} – sastav (čekiraj 11 igrača za simulaciju)")
 
-    # GK red
-    gk_players = inputs_for_line(
-        side, "GK", 1, ["GK"], 0
-    )
+        for idx, pl in enumerate(squad):
+            key_prefix = f"{side}_pl_{idx}"
+            cols = st.columns(6)
 
-    # DEF red
-    if d_count >= 2:
-        def_defaults = ["DL"] + ["DC"] * (d_count - 2) + ["DR"]
+            with cols[0]:
+                use_default = idx < 11
+                use = st.checkbox("XI", value=use_default, key=f"{key_prefix}_use")
+
+            with cols[1]:
+                st.write(pl["name"])
+
+            with cols[2]:
+                # Za prvi igrača pretpostavi Gk, ostali Mid po defaultu.
+                default_role = "Gk" if idx == 0 else "Mid"
+                role = st.selectbox(
+                    "Uloga",
+                    ["Gk", "Def", "Mid", "Att"],
+                    index=["Gk", "Def", "Mid", "Att"].index(default_role),
+                    key=f"{key_prefix}_role",
+                )
+
+            with cols[3]:
+                q = st.number_input(
+                    "Q", 0, 100, int(round(pl["q"])),
+                    key=f"{key_prefix}_q",
+                )
+                kp = st.number_input(
+                    "Kp", 0, 100, int(pl["kp"]),
+                    key=f"{key_prefix}_kp",
+                )
+                tk = st.number_input(
+                    "Tk", 0, 100, int(pl["tk"]),
+                    key=f"{key_prefix}_tk",
+                )
+
+            with cols[4]:
+                pa = st.number_input(
+                    "Pa", 0, 100, int(pl["pa"]),
+                    key=f"{key_prefix}_pa",
+                )
+                sh = st.number_input(
+                    "Sh", 0, 100, int(pl["sh"]),
+                    key=f"{key_prefix}_sh",
+                )
+                he = st.number_input(
+                    "He", 0, 100, int(pl["he"]),
+                    key=f"{key_prefix}_he",
+                )
+
+            with cols[5]:
+                sp = st.number_input(
+                    "Sp", 0, 100, int(pl["sp"]),
+                    key=f"{key_prefix}_sp",
+                )
+                st_attr = st.number_input(
+                    "St", 0, 100, int(pl["st"]),
+                    key=f"{key_prefix}_st",
+                )
+                pe = st.number_input(
+                    "Pe", 0, 100, int(pl["pe"]),
+                    key=f"{key_prefix}_pe",
+                )
+                bc = st.number_input(
+                    "Bc", 0, 100, int(pl["bc"]),
+                    key=f"{key_prefix}_bc",
+                )
+
+            if use:
+                players.append(
+                    Player(
+                        name=pl["name"],
+                        role=role,
+                        q=float(q),
+                        kp=float(kp),
+                        tk=float(tk),
+                        pa=float(pa),
+                        sh=float(sh),
+                        he=float(he),
+                        sp=float(sp),
+                        st=float(st_attr),
+                        pe=float(pe),
+                        bc=float(bc),
+                    )
+                )
+
+        st.markdown("---")
     else:
-        def_defaults = ["DC"] * d_count
-    def_players = inputs_for_line(
-        side, "Odbrana", d_count, def_defaults, 1
-    )
+        st.info("Unesi ml-club link i klikni 'Učitaj tim' da vidiš igrače.")
 
-    # MID red
-    if m_count == 5:
-        mid_defaults = ["ML", "MCL", "MC", "MCR", "MR"]
-    elif m_count == 3:
-        mid_defaults = ["ML", "MC", "MR"]
-    elif m_count >= 2:
-        mid_defaults = ["ML"] + ["MC"] * (m_count - 2) + ["MR"]
-    else:
-        mid_defaults = ["MC"] * m_count
-    mid_players = inputs_for_line(
-        side, "Vezni red", m_count, mid_defaults, 1 + d_count
-    )
-
-    # ATT red
-    if a_count == 1:
-        att_defaults = ["ST"]
-    elif a_count == 2:
-        att_defaults = ["STL", "STR"]
-    else:
-        att_defaults = ["STL", "STR"] + ["ST"] * (a_count - 2)
-    att_players = inputs_for_line(
-        side, "Napad", a_count, att_defaults, 1 + d_count + m_count
-    )
-
-    players = gk_players + def_players + mid_players + att_players
-
-    # STATS
     stats = inputs_for_team_stats(side)
 
     return Team(
@@ -512,7 +500,7 @@ def build_team(side: str) -> Team:
 # ============================
 
 def main():
-    st.title("ManagerLeague – taktički simulator (fan-made)")
+    st.title("ManagerLeague – taktički simulator (ml-club import)")
 
     # TEREN
     st.subheader("Teren")
@@ -543,8 +531,11 @@ def main():
     n_matches = st.number_input("Broj simulacija", 50, 5000, 500, step=50)
 
     if st.button("Pokreni simulacije"):
-        if len(team_a.players) == 0 or len(team_b.players) == 0:
-            st.error("Moraš da uneseš igrače za oba tima.")
+        if len(team_a.players) != 11:
+            st.error(f"{team_a.name}: mora biti tačno 11 čekiranih igrača (trenutno {len(team_a.players)}).")
+            return
+        if len(team_b.players) != 11:
+            st.error(f"{team_b.name}: mora biti tačno 11 čekiranih igrača (trenutno {len(team_b.players)}).")
             return
 
         win_a, draw, win_b, scores = simulate_series(team_a, team_b, int(n_matches))
