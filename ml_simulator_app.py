@@ -2,7 +2,7 @@ import math
 import random
 import re
 from dataclasses import dataclass
-from typing import List, Tuple, Dict, Optional
+from typing import List, Tuple, Dict
 
 import streamlit as st
 import requests
@@ -14,7 +14,8 @@ import requests
 @dataclass
 class Player:
     name: str
-    role: str      # Gk, Def, Mid, Att
+    position: str  # GK, DL, DC, DR, ML, MC, MR, ST...
+    role: str      # Gk, Def, Mid, Att (za engine)
     q: float
     kp: float
     tk: float
@@ -55,16 +56,25 @@ class Team:
 #   HELPERI
 # ============================
 
+POS_OPTIONS = [
+    "GK",
+    "DL", "DC", "DCL", "DCR", "DR",
+    "DML", "DMC", "DMR",
+    "ML", "MCL", "MCR", "MR",
+    "AML", "AMC", "AMR",
+    "STL", "ST", "STR",
+]
+
+
 def pos_to_role(pos: str) -> str:
-    """Pretvori oznaku pozicije u ulogu za engine."""
-    pos = pos.lower()
-    if pos in ("gk",):
+    pos = pos.upper()
+    if pos == "GK":
         return "Gk"
-    if pos.startswith("d"):
+    if pos.startswith("D"):
         return "Def"
-    if pos.startswith("m"):
+    if pos.startswith("M"):
         return "Mid"
-    if pos.startswith("a") or pos.startswith("s"):
+    if pos.startswith("A") or pos.startswith("ST"):
         return "Att"
     return "Mid"
 
@@ -75,21 +85,28 @@ def pos_to_role(pos: str) -> str:
 
 def scrape_team_from_ml_club(url: str) -> List[Dict[str, float]]:
     """
-    Prima link sa ml-club.eu (npr. https://ml-club.eu/?team=118270%3A)
-    i vraća listu dict-ova:
+    Prima link sa ml-club.eu ili ML team link (pretvara ga).
+    Vraća listu dict-ova:
       { 'name', 'age', 'q','kp','tk','pa','sh','he','sp','st','pe','bc' }
     """
     players: List[Dict[str, float]] = []
     if not url.strip():
         return players
 
+    url = url.strip()
+
+    # ako je nalepio ML link, npr https://football.managerleague.com/ml/team/118270
+    m = re.search(r"/team/(\d+)", url)
+    if "football.managerleague.com" in url and m:
+        team_id = m.group(1)
+        url = f"https://ml-club.eu/?team={team_id}%3A"
+
     try:
-        resp = requests.get(url.strip(), timeout=10)
+        resp = requests.get(url, timeout=10)
         resp.raise_for_status()
     except Exception:
         return players
 
-    # Skini HTML tagove, ostavi čist tekst
     text = resp.text
     text = re.sub(r"<[^>]+>", " ", text)
     text = re.sub(r"\s+", " ", text)
@@ -184,14 +201,26 @@ def average_q(team: Team) -> float:
 
 
 def compute_line_ratings(team: Team) -> Tuple[float, float]:
+    """
+    Vraća (attack_rating, defense_rating).
+    U obzir uzima:
+      - Q + atribute
+      - ulogu (Gk/Def/Mid/Att)
+      - poziciju (DL vs DC, ML vs MC...)
+      - team stats
+      - stil, pressure, home
+    """
     base_q = average_q(team)
     atk_raw = 0.0
     def_raw = 0.0
 
     for p in team.players:
         role = p.role.lower()
+        pos = p.position.upper()
+
+        # bazne težine po ulozi
         if role == "att":
-            atk_raw += (
+            atk = (
                 0.35 * p.sh +
                 0.25 * p.pa +
                 0.10 * p.kp +
@@ -199,9 +228,9 @@ def compute_line_ratings(team: Team) -> Tuple[float, float]:
                 0.05 * p.he +
                 0.10 * p.q
             )
-            def_raw += 0.15 * p.tk + 0.10 * p.bc + 0.05 * p.st
+            deff = 0.15 * p.tk + 0.10 * p.bc + 0.05 * p.st
         elif role == "mid":
-            atk_raw += (
+            atk = (
                 0.25 * p.sh +
                 0.30 * p.pa +
                 0.15 * p.kp +
@@ -209,18 +238,41 @@ def compute_line_ratings(team: Team) -> Tuple[float, float]:
                 0.05 * p.he +
                 0.05 * p.q
             )
-            def_raw += 0.25 * p.tk + 0.10 * p.bc + 0.05 * p.st
+            deff = 0.25 * p.tk + 0.10 * p.bc + 0.05 * p.st
         elif role == "def":
-            def_raw += (
+            deff = (
                 0.35 * p.tk +
                 0.20 * p.he +
                 0.15 * p.st +
                 0.15 * p.bc +
                 0.05 * p.q
             )
-            atk_raw += 0.05 * p.pa + 0.05 * p.he
+            atk = 0.05 * p.pa + 0.05 * p.he
         else:  # Gk
-            def_raw += 0.40 * p.q + 0.15 * p.bc + 0.10 * p.st
+            deff = 0.40 * p.q + 0.15 * p.bc + 0.10 * p.st
+            atk = 0.02 * p.pa
+
+        # fino podešavanje po poziciji
+        if pos in ("DL", "DR"):
+            # bekovi – više brzina/pas, manje duel
+            atk *= 1.05
+            deff *= 0.97
+            atk += 0.05 * p.sp + 0.05 * p.pa
+        elif pos in ("DC", "DCL", "DCR"):
+            # centralni defovi – više tackl/he
+            deff *= 1.05
+            deff += 0.05 * p.tk + 0.05 * p.he
+        elif pos in ("ML", "MR", "AML", "AMR", "STL", "STR"):
+            # krila / wide napad
+            atk *= 1.05
+            atk += 0.05 * p.sp + 0.05 * p.sh
+        elif pos in ("DML", "DMR", "DMC"):
+            # def. vezni
+            deff *= 1.03
+            deff += 0.05 * p.tk
+
+        atk_raw += atk
+        def_raw += deff
 
     if team.players:
         atk_raw /= len(team.players)
@@ -244,14 +296,14 @@ def compute_line_ratings(team: Team) -> Tuple[float, float]:
     attack_rating  = base_q + atk_raw * 0.15 + atk_mod * 5 + home_atk
     defense_rating = base_q + def_raw * 0.15 + def_mod * 5 + home_def
 
-    p = team.pressure.lower()
-    if p == "attacking":
+    p_press = team.pressure.lower()
+    if p_press == "attacking":
         attack_rating += 1.0
         defense_rating -= 0.5
-    elif p == "defending":
+    elif p_press == "defending":
         attack_rating -= 0.5
         defense_rating += 1.0
-    elif p == "counter-attacking":
+    elif p_press == "counter-attacking":
         attack_rating += 0.5 * ((s.counter_attacking - 50) / 50.0)
         defense_rating += 0.2
 
@@ -350,10 +402,9 @@ def build_team(side: str) -> Team:
 
     name = st.text_input(f"{side} – ime tima", value=side)
 
-    # Link ka ml-club.eu
     team_url = st.text_input(
-        f"{side} – ml-club link tima",
-        help="Npr. https://ml-club.eu/?team=118270%3A",
+        f"{side} – ml-club ili ML link tima",
+        help="Primer: https://ml-club.eu/?team=118270%3A ili ML link /team/118270",
         key=f"{side}_url",
     )
 
@@ -395,23 +446,33 @@ def build_team(side: str) -> Team:
 
         for idx, pl in enumerate(squad):
             key_prefix = f"{side}_pl_{idx}"
-            cols = st.columns(6)
+            cols = st.columns(7)
 
             with cols[0]:
-                use_default = idx < 11
-                use = st.checkbox("XI", value=use_default, key=f"{key_prefix}_use")
+                # sada su SVI default čekirani (ti skidaš rezervu)
+                use = st.checkbox("XI", value=True, key=f"{key_prefix}_use")
 
             with cols[1]:
                 st.write(pl["name"])
 
             with cols[2]:
-                # Za prvi igrača pretpostavi Gk, ostali Mid po defaultu.
-                default_role = "Gk" if idx == 0 else "Mid"
-                role = st.selectbox(
-                    "Uloga",
-                    ["Gk", "Def", "Mid", "Att"],
-                    index=["Gk", "Def", "Mid", "Att"].index(default_role),
-                    key=f"{key_prefix}_role",
+                # gruba pretpostavka: 1. igrač GK, sledeća 4 def, ostatak mid/att
+                if idx == 0:
+                    pos_default = "GK"
+                elif 1 <= idx <= 4:
+                    pos_default = "DC"
+                else:
+                    pos_default = "MC"
+                if pos_default in POS_OPTIONS:
+                    default_index = POS_OPTIONS.index(pos_default)
+                else:
+                    default_index = 0
+
+                pos = st.selectbox(
+                    "Poz.",
+                    POS_OPTIONS,
+                    index=default_index,
+                    key=f"{key_prefix}_pos",
                 )
 
             with cols[3]:
@@ -451,6 +512,8 @@ def build_team(side: str) -> Team:
                     "St", 0, 100, int(pl["st"]),
                     key=f"{key_prefix}_st",
                 )
+
+            with cols[6]:
                 pe = st.number_input(
                     "Pe", 0, 100, int(pl["pe"]),
                     key=f"{key_prefix}_pe",
@@ -461,9 +524,11 @@ def build_team(side: str) -> Team:
                 )
 
             if use:
+                role = pos_to_role(pos)
                 players.append(
                     Player(
                         name=pl["name"],
+                        position=pos,
                         role=role,
                         q=float(q),
                         kp=float(kp),
@@ -480,7 +545,7 @@ def build_team(side: str) -> Team:
 
         st.markdown("---")
     else:
-        st.info("Unesi ml-club link i klikni 'Učitaj tim' da vidiš igrače.")
+        st.info("Unesi ml-club ili ML link i klikni 'Učitaj tim' da vidiš igrače.")
 
     stats = inputs_for_team_stats(side)
 
@@ -500,7 +565,7 @@ def build_team(side: str) -> Team:
 # ============================
 
 def main():
-    st.title("ManagerLeague – taktički simulator (ml-club import)")
+    st.title("ManagerLeague – taktički simulator (ml-club import + pozicije)")
 
     # TEREN
     st.subheader("Teren")
