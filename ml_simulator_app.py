@@ -17,6 +17,7 @@ class Player:
     age: int
     role: str      # Gk, Def, Mid, Att
     position: str  # GK, DC, DL, MR, ST...
+    sa: str        # special ability
     q: float
     kp: float
     tk: float
@@ -67,6 +68,16 @@ POS_BY_ROLE = {
     "Mid": ["MC", "MCL", "MCR", "ML", "MR"],
     "Att": ["ST", "STL", "STR"],
 }
+
+SA_OPTIONS = [
+    "None",
+    "Penalty-stopper",
+    "Field Expert",
+    "Thief",
+    "Dribbler",
+    "Speedster",
+    "Acrobat",
+]
 
 # ============================
 #   SCRAPER ZA ml-club / ML
@@ -188,7 +199,9 @@ def compute_line_ratings(team: Team) -> Tuple[float, float]:
     for p in team.players:
         role = p.role
         pos = p.position.upper()
+        sa = p.sa.lower()
 
+        # osnovno po ulozi
         if role == "Att":
             atk = (
                 0.35 * p.sh +
@@ -222,6 +235,7 @@ def compute_line_ratings(team: Team) -> Tuple[float, float]:
             deff = 0.40 * p.q + 0.15 * p.bc + 0.10 * p.st
             atk = 0.02 * p.pa
 
+        # fino po poziciji
         if pos in ("DL", "DR"):
             atk *= 1.05
             deff *= 0.97
@@ -232,6 +246,23 @@ def compute_line_ratings(team: Team) -> Tuple[float, float]:
         elif pos in ("ML", "MR", "AML", "AMR", "STL", "STR"):
             atk *= 1.05
             atk += 0.05 * p.sp + 0.05 * p.sh
+
+        # specijalne sposobnosti – mali bonus
+        if "penalty-stopper" in sa and role == "Gk":
+            deff += 1.0
+        if "field expert" in sa:
+            atk += 0.4
+            deff += 0.4
+        if "thief" in sa:
+            deff += 0.8
+        if "dribbler" in sa:
+            atk += 0.8
+        if "speedster" in sa:
+            atk += 0.8
+            deff += 0.2
+        if "acrobat" in sa:
+            atk += 0.7
+            deff += 0.1
 
         atk_raw += atk
         def_raw += deff
@@ -410,23 +441,14 @@ def build_team(side: str) -> Team:
     if squad:
         st.subheader(f"{side} – sastav (čekiraj 11 igrača za simulaciju)")
 
-        # dugme za sortiranje (XI gore)
-        if st.button("Poređaj tim", key=f"{side}_sort"):
-            order = st.session_state.get(order_key, list(range(len(squad))))
-            xi, bench = [], []
-            for idx in order:
-                use = st.session_state.get(f"{side}_pl_{idx}_use", True)
-                (xi if use else bench).append(idx)
-            st.session_state[order_key] = xi + bench
-
         order = st.session_state.get(order_key, list(range(len(squad))))
 
-        # header
+        # header (dodali SA)
         cols = st.columns(
-            [0.5, 1.3, 1.3, 2.4,
+            [0.5, 1.1, 1.1, 1.6, 2.4,
              0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9]
         )
-        headers = ["XI", "Uloga", "Poz.", "Name",
+        headers = ["XI", "Uloga", "Poz.", "SA", "Name",
                    "Q", "Kp", "Tk", "Pa", "Sh", "He", "Sp", "St", "Pe", "Bc"]
         for c, h in zip(cols, headers):
             c.write(f"**{h}**")
@@ -436,7 +458,7 @@ def build_team(side: str) -> Team:
             key_prefix = f"{side}_pl_{idx}"
 
             cols = st.columns(
-                [0.5, 1.3, 1.3, 2.4,
+                [0.5, 1.1, 1.1, 1.6, 2.4,
                  0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9]
             )
 
@@ -444,7 +466,7 @@ def build_team(side: str) -> Team:
             with cols[0]:
                 use = st.checkbox("", value=True, key=f"{key_prefix}_use")
 
-            # ULOGA – select + mali tekst ispod (uvijek vidiš šta je izabrano)
+            # ULOGA
             with cols[1]:
                 if idx == 0:
                     default_role = "Gk"
@@ -463,7 +485,7 @@ def build_team(side: str) -> Team:
                     unsafe_allow_html=True,
                 )
 
-            # POZICIJA – select + mali tekst ispod
+            # POZICIJA
             with cols[2]:
                 pos_options = POS_BY_ROLE.get(role, ["GK"])
                 pos_key = f"{key_prefix}_pos"
@@ -476,13 +498,24 @@ def build_team(side: str) -> Team:
                     unsafe_allow_html=True,
                 )
 
-            # boja: samo startnih 11
+            # SPECIAL ABILITY
+            with cols[3]:
+                sa_key = f"{key_prefix}_sa"
+                if sa_key not in st.session_state:
+                    st.session_state[sa_key] = "None"
+                sa = st.selectbox("", SA_OPTIONS, key=sa_key)
+                st.markdown(
+                    f"<div style='font-size:10px;text-align:center'>{sa}</div>",
+                    unsafe_allow_html=True,
+                )
+
+            # boja za startnih 11
             if use:
                 color = ROLE_COLOR.get(role, "#dddddd")
             else:
                 color = "#e0e0e0"
 
-            with cols[3]:
+            with cols[4]:
                 st.markdown(
                     f"<div style='background-color:{color};"
                     f"padding:2px 6px;border-radius:4px;color:black;'>"
@@ -491,7 +524,7 @@ def build_team(side: str) -> Team:
                 )
 
             # atributi
-            with cols[4]:
+            with cols[5]:
                 q = st.number_input(
                     "",
                     min_value=0,
@@ -500,23 +533,23 @@ def build_team(side: str) -> Team:
                     step=1,
                     key=f"{key_prefix}_q",
                 )
-            with cols[5]:
-                kp = st.number_input("", 0, 100, int(pl["kp"]), key=f"{key_prefix}_kp")
             with cols[6]:
-                tk = st.number_input("", 0, 100, int(pl["tk"]), key=f"{key_prefix}_tk")
+                kp = st.number_input("", 0, 100, int(pl["kp"]), key=f"{key_prefix}_kp")
             with cols[7]:
-                pa = st.number_input("", 0, 100, int(pl["pa"]), key=f"{key_prefix}_pa")
+                tk = st.number_input("", 0, 100, int(pl["tk"]), key=f"{key_prefix}_tk")
             with cols[8]:
-                sh = st.number_input("", 0, 100, int(pl["sh"]), key=f"{key_prefix}_sh")
+                pa = st.number_input("", 0, 100, int(pl["pa"]), key=f"{key_prefix}_pa")
             with cols[9]:
-                he = st.number_input("", 0, 100, int(pl["he"]), key=f"{key_prefix}_he")
+                sh = st.number_input("", 0, 100, int(pl["sh"]), key=f"{key_prefix}_sh")
             with cols[10]:
-                sp = st.number_input("", 0, 100, int(pl["sp"]), key=f"{key_prefix}_sp")
+                he = st.number_input("", 0, 100, int(pl["he"]), key=f"{key_prefix}_he")
             with cols[11]:
-                st_attr = st.number_input("", 0, 100, int(pl["st"]), key=f"{key_prefix}_st")
+                sp = st.number_input("", 0, 100, int(pl["sp"]), key=f"{key_prefix}_sp")
             with cols[12]:
-                pe = st.number_input("", 0, 100, int(pl["pe"]), key=f"{key_prefix}_pe")
+                st_attr = st.number_input("", 0, 100, int(pl["st"]), key=f"{key_prefix}_st")
             with cols[13]:
+                pe = st.number_input("", 0, 100, int(pl["pe"]), key=f"{key_prefix}_pe")
+            with cols[14]:
                 bc = st.number_input("", 0, 100, int(pl["bc"]), key=f"{key_prefix}_bc")
 
             if use:
@@ -526,6 +559,7 @@ def build_team(side: str) -> Team:
                         age=int(pl["age"]),
                         role=role,
                         position=position,
+                        sa=sa,
                         q=float(q),
                         kp=float(kp),
                         tk=float(tk),
@@ -538,6 +572,15 @@ def build_team(side: str) -> Team:
                         bc=float(bc),
                     )
                 )
+
+        # DUGME "POREDJAJ TIM" – POSLE SPISKA IGRAČA
+        if st.button("Poređaj tim", key=f"{side}_sort"):
+            order = st.session_state.get(order_key, list(range(len(squad))))
+            xi, bench = [], []
+            for idx in order:
+                use = st.session_state.get(f"{side}_pl_{idx}_use", True)
+                (xi if use else bench).append(idx)
+            st.session_state[order_key] = xi + bench
 
         st.markdown("---")
     else:
@@ -561,7 +604,7 @@ def build_team(side: str) -> Team:
 # ============================
 
 def main():
-    st.title("ManagerLeague – taktički simulator (ml-club import)")
+    st.title("ManagerLeague – taktički simulator (ml-club import + SA)")
 
     st.markdown(
         """
