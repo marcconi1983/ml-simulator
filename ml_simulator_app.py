@@ -414,7 +414,7 @@ def build_team(side: str) -> Team:
     if squad and order_key not in st.session_state:
         st.session_state[order_key] = list(range(len(squad)))
 
-    # taktički deo
+    # taktički deo (sa key da Save/Load može da ih menja)
     st.subheader(f"{side} – Taktika")
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -422,18 +422,21 @@ def build_team(side: str) -> Team:
             f"{side} – formacija",
             ["4-4-2", "4-5-1", "4-3-3", "3-5-2", "3-4-3", "5-4-1"],
             index=0,
+            key=f"{side}_formation",
         )
     with col2:
         style = st.selectbox(
             f"{side} – stil igre",
             ["mixed", "continental", "longballs"],
             index=0,
+            key=f"{side}_style",
         )
     with col3:
         pressure = st.selectbox(
             f"{side} – pressure",
             ["normal", "attacking", "defending", "counter-attacking"],
             index=0,
+            key=f"{side}_pressure",
         )
 
     players: List[Player] = []
@@ -443,23 +446,25 @@ def build_team(side: str) -> Team:
 
         order = st.session_state.get(order_key, list(range(len(squad))))
 
-        # header (dodali SA)
+        # header – smanjen razmak atributa (0.75 umesto 0.9)
         cols = st.columns(
-            [0.5, 1.1, 1.1, 1.6, 2.4,
-             0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9]
+            [0.5, 1.0, 1.0, 1.4, 2.4,
+             0.75, 0.75, 0.75, 0.75, 0.75, 0.75, 0.75, 0.75, 0.75, 0.75]
         )
         headers = ["XI", "Uloga", "Poz.", "SA", "Name",
                    "Q", "Kp", "Tk", "Pa", "Sh", "He", "Sp", "St", "Pe", "Bc"]
         for c, h in zip(cols, headers):
             c.write(f"**{h}**")
 
+        ui_state: Dict[int, Dict[str, object]] = {}
+
         for idx in order:
             pl = squad[idx]
             key_prefix = f"{side}_pl_{idx}"
 
             cols = st.columns(
-                [0.5, 1.1, 1.1, 1.6, 2.4,
-                 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9]
+                [0.5, 1.0, 1.0, 1.4, 2.4,
+                 0.75, 0.75, 0.75, 0.75, 0.75, 0.75, 0.75, 0.75, 0.75, 0.75]
             )
 
             # XI checkbox
@@ -485,19 +490,18 @@ def build_team(side: str) -> Team:
                     unsafe_allow_html=True,
                 )
 
-        # POZICIJA
-        with cols[2]:
-            pos_options = POS_BY_ROLE.get(role, ["GK"])
-            pos_key = f"{key_prefix}_pos"
-            if pos_key not in st.session_state or \
-               st.session_state[pos_key] not in pos_options:
-                st.session_state[pos_key] = pos_options[0]
-            position = st.selectbox("", pos_options, key=pos_key)
-            st.markdown(
-                f"<div style='font-size:11px;text-align:center'>{position}</div>",
-                unsafe_allow_html=True,
-            )
-
+            # POZICIJA
+            with cols[2]:
+                pos_options = POS_BY_ROLE.get(role, ["GK"])
+                pos_key = f"{key_prefix}_pos"
+                if pos_key not in st.session_state or \
+                   st.session_state[pos_key] not in pos_options:
+                    st.session_state[pos_key] = pos_options[0]
+                position = st.selectbox("", pos_options, key=pos_key)
+                st.markdown(
+                    f"<div style='font-size:11px;text-align:center'>{position}</div>",
+                    unsafe_allow_html=True,
+                )
 
             # SPECIAL ABILITY
             with cols[3]:
@@ -524,7 +528,7 @@ def build_team(side: str) -> Team:
                     unsafe_allow_html=True,
                 )
 
-            # atributi
+            # atributi (sa smanjenom širinom kolona)
             with cols[5]:
                 q = st.number_input(
                     "",
@@ -553,6 +557,7 @@ def build_team(side: str) -> Team:
             with cols[14]:
                 bc = st.number_input("", 0, 100, int(pl["bc"]), key=f"{key_prefix}_bc")
 
+            # upiši u players listu ako je u startnih 11
             if use:
                 players.append(
                     Player(
@@ -574,6 +579,24 @@ def build_team(side: str) -> Team:
                     )
                 )
 
+            # zapamti kompletno stanje za ovaj idx (za Save formacije)
+            ui_state[idx] = {
+                "use": use,
+                "role": role,
+                "position": position,
+                "sa": sa,
+                "q": float(q),
+                "kp": float(kp),
+                "tk": float(tk),
+                "pa": float(pa),
+                "sh": float(sh),
+                "he": float(he),
+                "sp": float(sp),
+                "st": float(st_attr),
+                "pe": float(pe),
+                "bc": float(bc),
+            }
+
         # DUGME "POREDJAJ TIM" – POSLE SPISKA IGRAČA
         if st.button("Poređaj tim", key=f"{side}_sort"):
             order = st.session_state.get(order_key, list(range(len(squad))))
@@ -582,6 +605,66 @@ def build_team(side: str) -> Team:
                 use = st.session_state.get(f"{side}_pl_{idx}_use", True)
                 (xi if use else bench).append(idx)
             st.session_state[order_key] = xi + bench
+            st.experimental_rerun()
+
+        # SAVE / LOAD FORMACIJE – SAMO ZA "Ja"
+        if side == "Ja":
+            st.subheader("Sačuvane formacije (Ja)")
+
+            for slot in [1, 2, 3]:
+                coln1, coln2, coln3 = st.columns([2.5, 1, 1])
+                slot_name_key = f"{side}_slot{slot}_name"
+                default_label = f"Formacija {slot}"
+                with coln1:
+                    current_name = st.session_state.get(slot_name_key, default_label)
+                    slot_name = st.text_input(
+                        f"Slot {slot} naziv",
+                        value=current_name,
+                        key=slot_name_key,
+                    )
+
+                with coln2:
+                    if st.button(f"Sačuvaj {slot}", key=f"{side}_slot{slot}_save"):
+                        st.session_state[f"{side}_slot{slot}_data"] = {
+                            "name": slot_name,
+                            "formation": formation,
+                            "style": style,
+                            "pressure": pressure,
+                            "order": order,
+                            "ui": ui_state,
+                        }
+                        st.success(f"Formacija sačuvana u slot {slot}.")
+
+                with coln3:
+                    if st.button(f"Učitaj {slot}", key=f"{side}_slot{slot}_load"):
+                        data = st.session_state.get(f"{side}_slot{slot}_data")
+                        if not data:
+                            st.warning(f"Slot {slot} je prazan.")
+                        else:
+                            # vrati taktičke postavke
+                            st.session_state[f"{side}_formation"] = data["formation"]
+                            st.session_state[f"{side}_style"] = data["style"]
+                            st.session_state[f"{side}_pressure"] = data["pressure"]
+                            st.session_state[order_key] = data["order"]
+
+                            ui_saved: Dict[int, Dict[str, object]] = data["ui"]
+                            for idx2, vals in ui_saved.items():
+                                st.session_state[f"{side}_pl_{idx2}_use"] = vals["use"]
+                                st.session_state[f"{side}_pl_{idx2}_role"] = vals["role"]
+                                st.session_state[f"{side}_pl_{idx2}_pos"] = vals["position"]
+                                st.session_state[f"{side}_pl_{idx2}_sa"] = vals["sa"]
+                                st.session_state[f"{side}_pl_{idx2}_q"] = int(vals["q"])
+                                st.session_state[f"{side}_pl_{idx2}_kp"] = int(vals["kp"])
+                                st.session_state[f"{side}_pl_{idx2}_tk"] = int(vals["tk"])
+                                st.session_state[f"{side}_pl_{idx2}_pa"] = int(vals["pa"])
+                                st.session_state[f"{side}_pl_{idx2}_sh"] = int(vals["sh"])
+                                st.session_state[f"{side}_pl_{idx2}_he"] = int(vals["he"])
+                                st.session_state[f"{side}_pl_{idx2}_sp"] = int(vals["sp"])
+                                st.session_state[f"{side}_pl_{idx2}_st"] = int(vals["st"])
+                                st.session_state[f"{side}_pl_{idx2}_pe"] = int(vals["pe"])
+                                st.session_state[f"{side}_pl_{idx2}_bc"] = int(vals["bc"])
+
+                            st.experimental_rerun()
 
         st.markdown("---")
     else:
@@ -605,7 +688,7 @@ def build_team(side: str) -> Team:
 # ============================
 
 def main():
-    st.title("ManagerLeague – taktički simulator (ml-club import + SA)")
+    st.title("ManagerLeague – taktički simulator (ml-club import + SA + formacije)")
 
     st.markdown(
         """
