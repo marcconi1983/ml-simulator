@@ -163,7 +163,9 @@ FORMATION_MATCHUPS = {
     ("4-3-3", "4-4-2"): +0.5,
 }
 
+
 def style_match_bonus(my_style: str, opp_style: str) -> float:
+    """Prednost / mana stila igre u odnosu na protivnika."""
     my = my_style.lower()
     op = opp_style.lower()
     if my == op:
@@ -184,6 +186,7 @@ def style_match_bonus(my_style: str, opp_style: str) -> float:
 
 
 def formation_match_bonus(my_form: str, opp_form: str) -> float:
+    """Mala prednost određenih formacija nad drugima."""
     return FORMATION_MATCHUPS.get((my_form, opp_form), 0.0)
 
 
@@ -192,6 +195,12 @@ def average_q(team: Team) -> float:
 
 
 def compute_line_ratings(team: Team) -> Tuple[float, float]:
+    """
+    Računa napadački i defanzivni rejting tima na osnovu igrača + team stats.
+
+    Ideja je ista kao u prethodnoj verziji, ali kasnije to koristimo kao ulaz
+    u Monte-Carlo model koji generiše šanse iz otvorene igre i prekida.
+    """
     base_q = average_q(team)
     atk_raw = 0.0
     def_raw = 0.0
@@ -201,7 +210,7 @@ def compute_line_ratings(team: Team) -> Tuple[float, float]:
         pos = p.position.upper()
         sa = p.sa.lower()
 
-        # osnovno po ulozi
+        # osnovna uloga
         if role == "Att":
             atk = (
                 0.35 * p.sh +
@@ -224,18 +233,18 @@ def compute_line_ratings(team: Team) -> Tuple[float, float]:
             deff = 0.25 * p.tk + 0.10 * p.bc + 0.05 * p.st
         elif role == "Def":
             deff = (
-                0.35 * p.tk +
-                0.20 * p.he +
+                0.38 * p.tk +
+                0.22 * p.he +
                 0.15 * p.st +
                 0.15 * p.bc +
                 0.05 * p.q
             )
-            atk = 0.05 * p.pa + 0.05 * p.he
+            atk = 0.06 * p.pa + 0.04 * p.he
         else:  # Gk
-            deff = 0.40 * p.q + 0.15 * p.bc + 0.10 * p.st
+            deff = 0.42 * p.q + 0.18 * p.bc + 0.10 * p.st
             atk = 0.02 * p.pa
 
-        # fino po poziciji
+        # fino podešavanje po poziciji
         if pos in ("DL", "DR"):
             atk *= 1.05
             deff *= 0.97
@@ -273,6 +282,7 @@ def compute_line_ratings(team: Team) -> Tuple[float, float]:
 
     s = team.stats
 
+    # team stats modifikatori (napad)
     atk_mod  = 0.06 * (s.attacking - 50) / 50.0
     atk_mod += 0.03 * (s.teamplay - 50) / 50.0
     atk_mod += 0.03 * (s.understanding - 50) / 50.0
@@ -280,6 +290,7 @@ def compute_line_ratings(team: Team) -> Tuple[float, float]:
     atk_mod += 0.01 * (s.free_kick - 50) / 50.0
     atk_mod += 0.01 * (s.corner - 50) / 50.0
 
+    # team stats modifikatori (odbrana)
     def_mod  = 0.06 * (s.defending - 50) / 50.0
     def_mod += 0.03 * (s.offside - 50) / 50.0
 
@@ -289,6 +300,7 @@ def compute_line_ratings(team: Team) -> Tuple[float, float]:
     attack_rating  = base_q + atk_raw * 0.15 + atk_mod * 5 + home_atk
     defense_rating = base_q + def_raw * 0.15 + def_mod * 5 + home_def
 
+    # uticaj pressure-a na ukupne rejtinge
     p_press = team.pressure.lower()
     if p_press == "attacking":
         attack_rating += 1.0
@@ -304,6 +316,7 @@ def compute_line_ratings(team: Team) -> Tuple[float, float]:
 
 
 def compute_effective_strengths(team_a: Team, team_b: Team) -> Tuple[float, float, float, float]:
+    """Spoji rejtinge sa bonusima formacije i stila."""
     atk_a, def_a = compute_line_ratings(team_a)
     atk_b, def_b = compute_line_ratings(team_b)
 
@@ -321,6 +334,7 @@ def compute_effective_strengths(team_a: Team, team_b: Team) -> Tuple[float, floa
 
 
 def poisson_sample(lmbda: float) -> int:
+    """Klasičan Poisson sampler (za broj napada po timu)."""
     L = math.exp(-max(lmbda, 0.01))
     k = 0
     p = 1.0
@@ -330,18 +344,142 @@ def poisson_sample(lmbda: float) -> int:
     return k - 1
 
 
+def _logistic(x: float) -> float:
+    return 1.0 / (1.0 + math.exp(-x))
+
+
+def _get_gk_sa(team: Team) -> str:
+    for p in team.players:
+        if p.role == "Gk":
+            return p.sa.lower()
+    return ""
+
+
+def _build_attack_profile(team: Team, atk: float, opp_def: float, opp_gk_sa: str) -> Dict[str, float]:
+    """
+    Iz napadačkog rejtinga i team stats izvodi:
+    - očekivani broj napada
+    - verovatnoće da je napad: open / corner / fk / pen
+    - verovatnoće gola po tipu napada
+    """
+    s = team.stats
+    diff = atk - opp_def
+
+    # bazni broj napada
+    chance_intensity = 8.0 + 0.08 * diff
+    chance_intensity += 0.04 * (s.attacking - 50) / 10.0
+    chance_intensity += 0.03 * (s.teamplay - 50) / 10.0
+
+    style = team.style.lower()
+    if style == "longballs":
+        # manje napada ali su malo "teže"
+        chance_intensity -= 1.0
+        style_goal_boost = 0.04
+    elif style == "continental":
+        chance_intensity += 0.5
+        style_goal_boost = -0.02
+    else:  # mixed
+        style_goal_boost = 0.0
+
+    pressure = team.pressure.lower()
+    if pressure == "attacking":
+        chance_intensity += 1.5
+    elif pressure == "defending":
+        chance_intensity -= 1.0
+    elif pressure == "counter-attacking":
+        chance_intensity += 0.5
+
+    chance_intensity = max(2.0, chance_intensity)
+
+    # koliko je tim jak na prekidima
+    corner_factor = (s.corner - 50) / 50.0
+    fk_factor = (s.free_kick - 50) / 50.0
+    pen_factor = (s.penalty - 50) / 50.0
+
+    # verovatnoće da napad bude koji tip (na osnovu match reportova)
+    p_corner = 0.15 + 0.05 * corner_factor     # 10–20% napada
+    p_fk = 0.10 + 0.04 * fk_factor             # 6–14%
+    p_pen = 0.02 + 0.02 * pen_factor           # 1–4%
+    p_pen = max(0.01, min(0.06, p_pen))
+    # ostatak je otvorena igra
+    p_open = max(0.0, 1.0 - (p_corner + p_fk + p_pen))
+
+    # bazna "kvaliteta šanse" kao logistic(diff)
+    base = _logistic(diff / 6.0)
+
+    # verovatnoće gola po tipu napada
+    p_goal_open = 0.06 + 0.20 * base + style_goal_boost         # ~10–25%
+    p_goal_corner = 0.03 + 0.12 * base + 0.04 * corner_factor   # ~5–18%
+    p_goal_fk = 0.02 + 0.10 * base + 0.04 * fk_factor           # ~4–16%
+
+    # penali – vrlo visoka šansa, ali zavisi od Penalty statsa i gk SA
+    p_goal_pen = 0.75 + 0.10 * pen_factor                       # ~70–85%
+    if "penalty-stopper" in opp_gk_sa:
+        p_goal_pen -= 0.10
+    p_goal_pen = max(0.5, min(0.92, p_goal_pen))
+
+    return {
+        "intensity": chance_intensity,
+        "p_open": p_open,
+        "p_corner": p_corner,
+        "p_fk": p_fk,
+        "p_pen": p_pen,
+        "p_goal_open": p_goal_open,
+        "p_goal_corner": p_goal_corner,
+        "p_goal_fk": p_goal_fk,
+        "p_goal_pen": p_goal_pen,
+    }
+
+
+def _simulate_goals(profile: Dict[str, float]) -> int:
+    """Na osnovu profila tima simulira broj golova u jednoj utakmici."""
+    goals = 0
+    n_attacks = poisson_sample(profile["intensity"])
+
+    for _ in range(n_attacks):
+        r = random.random()
+        if r < profile["p_pen"]:
+            p_goal = profile["p_goal_pen"]
+        elif r < profile["p_pen"] + profile["p_fk"]:
+            p_goal = profile["p_goal_fk"]
+        elif r < profile["p_pen"] + profile["p_fk"] + profile["p_corner"]:
+            p_goal = profile["p_goal_corner"]
+        else:
+            p_goal = profile["p_goal_open"]
+
+        if random.random() < p_goal:
+            goals += 1
+
+    return goals
+
+
 def simulate_single_match(team_a: Team, team_b: Team) -> Tuple[int, int]:
+    """
+    Nova simulacija jedne utakmice:
+    - izračuna efektivne rejtinge,
+    - izvede broj napada po timu,
+    - za svaki napad odabere tip (open/corner/fk/pen) i pokuša gol.
+    """
     atk_a, def_a, atk_b, def_b = compute_effective_strengths(team_a, team_b)
-    diff_a = atk_a - def_b
-    diff_b = atk_b - def_a
-    lambda_a = max(0.1, 1.3 + diff_a * 0.05)
-    lambda_b = max(0.1, 1.3 + diff_b * 0.05)
-    goals_a = poisson_sample(lambda_a)
-    goals_b = poisson_sample(lambda_b)
+
+    gk_sa_a = _get_gk_sa(team_a)
+    gk_sa_b = _get_gk_sa(team_b)
+
+    profile_a = _build_attack_profile(team_a, atk_a, def_b, gk_sa_b)
+    profile_b = _build_attack_profile(team_b, atk_b, def_a, gk_sa_a)
+
+    goals_a = _simulate_goals(profile_a)
+    goals_b = _simulate_goals(profile_b)
+
     return goals_a, goals_b
 
 
-def simulate_series(team_a: Team, team_b: Team, n_matches: int) -> Tuple[float, float, float, Dict[Tuple[int, int], int]]:
+def simulate_series(
+    team_a: Team,
+    team_b: Team,
+    n_matches: int
+) -> Tuple[float, float, float, Dict[Tuple[int, int], int]]:
+    """Kao i ranije: pokreće više mečeva i vraća procente + distribuciju rezultata."""
     win_a = draw = win_b = 0
     scores: Dict[Tuple[int, int], int] = {}
     for _ in range(n_matches):
@@ -360,6 +498,7 @@ def simulate_series(team_a: Team, team_b: Team, n_matches: int) -> Tuple[float, 
         100 * win_b / n_matches,
         scores,
     )
+
 
 # ============================
 #   UI – TEAM / STATS
