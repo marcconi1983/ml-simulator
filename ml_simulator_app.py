@@ -65,7 +65,7 @@ ROLE_COLOR = {
 POS_BY_ROLE = {
     "Gk": ["GK"],
     "Def": ["DC", "DCL", "DCR", "DL", "DR"],
-    # Mid kako si tražio: samo centralne i krila, bez DMC itd.
+    # Mid kako si tražio: MC, MCL, MCR, ML, MR
     "Mid": ["MC", "MCL", "MCR", "ML", "MR"],
     "Att": ["ST", "STL", "STR"],
 }
@@ -383,8 +383,12 @@ def build_team(side: str) -> Team:
             st.warning("Nisam uspeo da učitam tim sa datog linka.")
         else:
             st.session_state[f"{side}_squad"] = squad
+            st.session_state[f"{side}_order"] = list(range(len(squad)))
 
     squad = st.session_state.get(f"{side}_squad", [])
+    order_key = f"{side}_order"
+    if squad and order_key not in st.session_state:
+        st.session_state[order_key] = list(range(len(squad)))
 
     # Taktika
     st.subheader(f"{side} – Taktika")
@@ -413,21 +417,38 @@ def build_team(side: str) -> Team:
     if squad:
         st.subheader(f"{side} – sastav (čekiraj 11 igrača za simulaciju)")
 
-        # tabela – bez Age, više prostora za atribute
+        # Dugme "Poređaj tim": XI gore, klupa dole
+        if st.button("Poređaj tim", key=f"{side}_sort"):
+            order = st.session_state.get(order_key, list(range(len(squad))))
+            xi = []
+            bench = []
+            for idx in order:
+                use_key = f"{side}_pl_{idx}_use"
+                use = st.session_state.get(use_key, True)
+                if use:
+                    xi.append(idx)
+                else:
+                    bench.append(idx)
+            st.session_state[order_key] = xi + bench
+
+        order = st.session_state.get(order_key, list(range(len(squad))))
+
+        # tabela – bez Age, sve u jednom redu
         cols = st.columns(
-            [0.5, 1.3, 1.3, 2.4,
-             1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+            [0.5, 1.0, 1.3, 2.4,
+             0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9]
         )
-        headers = ["XI", "Uloga", "Poz.", "Name",
+        headers = ["XI", "U", "Poz.", "Name",
                    "Q", "Kp", "Tk", "Pa", "Sh", "He", "Sp", "St", "Pe", "Bc"]
         for c, h in zip(cols, headers):
             c.write(f"**{h}**")
 
-        for idx, pl in enumerate(squad):
+        for idx in order:
+            pl = squad[idx]
             key_prefix = f"{side}_pl_{idx}"
             cols = st.columns(
-                [0.5, 1.3, 1.3, 2.4,
-                 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+                [0.5, 1.0, 1.3, 2.4,
+                 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9]
             )
 
             with cols[0]:
@@ -451,10 +472,6 @@ def build_team(side: str) -> Team:
                     ROLE_OPTIONS,
                     key=role_key,
                 )
-                st.markdown(
-                    f"<div style='font-size:11px;text-align:center;'>{role}</div>",
-                    unsafe_allow_html=True,
-                )
 
             # ---- Pozicija ----
             with cols[2]:
@@ -464,12 +481,12 @@ def build_team(side: str) -> Team:
                    st.session_state[pos_key] not in pos_options:
                     st.session_state[pos_key] = pos_options[0]
                 position = st.selectbox("", pos_options, key=pos_key)
-                st.markdown(
-                    f"<div style='font-size:11px;text-align:center;'>{position}</div>",
-                    unsafe_allow_html=True,
-                )
 
-            color = ROLE_COLOR.get(role, "#dddddd")
+            # Boja samo za igrače u prvih 11 (use=True)
+            if use:
+                color = ROLE_COLOR.get(role, "#dddddd")
+            else:
+                color = "#e0e0e0"
 
             with cols[3]:
                 st.markdown(
@@ -479,7 +496,7 @@ def build_team(side: str) -> Team:
                     unsafe_allow_html=True,
                 )
 
-            # --- atributi (Q i ostalo) ---
+            # --- atributi (dvocifreno, centrirano) ---
             with cols[4]:
                 q = st.number_input(
                     "",
@@ -552,8 +569,7 @@ def build_team(side: str) -> Team:
 def main():
     st.title("ManagerLeague – taktički simulator (ml-club import)")
 
-    # globalni CSS za brojčana polja – manji font, manje paddinga,
-    # da lepo stanu dve cifre u prozor
+    # globalni CSS – manji font u numeričkim poljima, sve staje u jedan red
     st.markdown(
         """
         <style>
