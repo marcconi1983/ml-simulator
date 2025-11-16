@@ -495,12 +495,8 @@ def build_team(side: str) -> Team:
 
             # label_visibility="collapsed" sakrije reč "Poz.",
             # ali u polju se jasno vidi npr. DC, DL, MR…
-            position = st.selectbox(
-                "Poz.",
-                pos_options,
-                key=pos_key,
-                label_visibility="collapsed"
-            )
+            position = st.selectbox("Poz.", pos_options, key=pos_key)
+
 
 
             # SPECIAL ABILITY
