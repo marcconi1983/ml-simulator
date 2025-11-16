@@ -414,11 +414,12 @@ def build_team(side: str) -> Team:
     if squad:
         st.subheader(f"{side} – sastav (čekiraj 11 igrača za simulaciju)")
 
+        # NEMA kolone Age → više prostora za atribute
         cols = st.columns(
-            [0.5, 1.2, 1.2, 0.7, 2.0,
-             1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+            [0.5, 1.4, 1.4, 2.2,
+             1.1, 1.1, 1.1, 1.1, 1.1, 1.1, 1.1, 1.1, 1.1, 1.1]
         )
-        headers = ["XI", "Uloga", "Poz.", "Age", "Name",
+        headers = ["XI", "Uloga", "Poz.", "Name",
                    "Q", "Kp", "Tk", "Pa", "Sh", "He", "Sp", "St", "Pe", "Bc"]
         for c, h in zip(cols, headers):
             c.write(f"**{h}**")
@@ -426,8 +427,8 @@ def build_team(side: str) -> Team:
         for idx, pl in enumerate(squad):
             key_prefix = f"{side}_pl_{idx}"
             cols = st.columns(
-                [0.5, 1.2, 1.2, 0.7, 2.0,
-                 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+                [0.5, 1.4, 1.4, 2.2,
+                 1.1, 1.1, 1.1, 1.1, 1.1, 1.1, 1.1, 1.1, 1.1, 1.1]
             )
 
             with cols[0]:
@@ -451,6 +452,11 @@ def build_team(side: str) -> Team:
                     ROLE_OPTIONS,
                     key=role_key,
                 )
+                # dodat label ispod da uvek vidiš šta je izabrano
+                st.markdown(
+                    f"<div style='font-size:11px;text-align:center;'>{role}</div>",
+                    unsafe_allow_html=True,
+                )
 
             # ---- Pozicija (u zavisnosti od uloge) ----
             with cols[2]:
@@ -460,13 +466,14 @@ def build_team(side: str) -> Team:
                    st.session_state[pos_key] not in pos_options:
                     st.session_state[pos_key] = pos_options[0]
                 position = st.selectbox("", pos_options, key=pos_key)
+                st.markdown(
+                    f"<div style='font-size:11px;text-align:center;'>{position}</div>",
+                    unsafe_allow_html=True,
+                )
 
             color = ROLE_COLOR.get(role, "#dddddd")
 
             with cols[3]:
-                st.write(int(pl["age"]))
-
-            with cols[4]:
                 st.markdown(
                     f"<div style='background-color:{color};"
                     f"padding:2px 6px;border-radius:4px;color:black;'>"
@@ -474,33 +481,33 @@ def build_team(side: str) -> Team:
                     unsafe_allow_html=True,
                 )
 
-            # ---- atributi ----
-            with cols[5]:
+            # ---- atributi (Q sada dvocifreno, pun prikaz) ----
+            with cols[4]:
                 q = st.number_input(
                     "",
-                    min_value=0.0,
-                    max_value=100.0,
-                    value=float(pl["q"]),
-                    step=0.1,
+                    min_value=0,
+                    max_value=100,
+                    value=int(round(pl["q"])),
+                    step=1,
                     key=f"{key_prefix}_q",
                 )
-            with cols[6]:
+            with cols[5]:
                 kp = st.number_input("", 0, 100, int(pl["kp"]), key=f"{key_prefix}_kp")
-            with cols[7]:
+            with cols[6]:
                 tk = st.number_input("", 0, 100, int(pl["tk"]), key=f"{key_prefix}_tk")
-            with cols[8]:
+            with cols[7]:
                 pa = st.number_input("", 0, 100, int(pl["pa"]), key=f"{key_prefix}_pa")
-            with cols[9]:
+            with cols[8]:
                 sh = st.number_input("", 0, 100, int(pl["sh"]), key=f"{key_prefix}_sh")
-            with cols[10]:
+            with cols[9]:
                 he = st.number_input("", 0, 100, int(pl["he"]), key=f"{key_prefix}_he")
-            with cols[11]:
+            with cols[10]:
                 sp = st.number_input("", 0, 100, int(pl["sp"]), key=f"{key_prefix}_sp")
-            with cols[12]:
+            with cols[11]:
                 st_attr = st.number_input("", 0, 100, int(pl["st"]), key=f"{key_prefix}_st")
-            with cols[13]:
+            with cols[12]:
                 pe = st.number_input("", 0, 100, int(pl["pe"]), key=f"{key_prefix}_pe")
-            with cols[14]:
+            with cols[13]:
                 bc = st.number_input("", 0, 100, int(pl["bc"]), key=f"{key_prefix}_bc")
 
             if use:
