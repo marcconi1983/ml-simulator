@@ -485,18 +485,19 @@ def build_team(side: str) -> Team:
                     unsafe_allow_html=True,
                 )
 
-            # POZICIJA
-            with cols[2]:
-                pos_options = POS_BY_ROLE.get(role, ["GK"])
-                pos_key = f"{key_prefix}_pos"
-                if pos_key not in st.session_state or \
-                   st.session_state[pos_key] not in pos_options:
-                    st.session_state[pos_key] = pos_options[0]
-                position = st.selectbox("", pos_options, key=pos_key)
-                st.markdown(
-                    f"<div style='font-size:11px;text-align:center'>{position}</div>",
-                    unsafe_allow_html=True,
-                )
+        # POZICIJA
+        with cols[2]:
+            pos_options = POS_BY_ROLE.get(role, ["GK"])
+            pos_key = f"{key_prefix}_pos"
+            if pos_key not in st.session_state or \
+               st.session_state[pos_key] not in pos_options:
+                st.session_state[pos_key] = pos_options[0]
+            position = st.selectbox("", pos_options, key=pos_key)
+            st.markdown(
+                f"<div style='font-size:11px;text-align:center'>{position}</div>",
+                unsafe_allow_html=True,
+            )
+
 
             # SPECIAL ABILITY
             with cols[3]:
