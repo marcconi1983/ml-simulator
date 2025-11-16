@@ -447,10 +447,11 @@ def build_team(side: str) -> Team:
         order = st.session_state.get(order_key, list(range(len(squad))))
 
         # header – smanjen razmak atributa (0.75 umesto 0.9)
-        cols = st.columns(
-            [0.5, 1.0, 1.0, 1.4, 2.4,
-             0.75, 0.75, 0.75, 0.75, 0.75, 0.75, 0.75, 0.75, 0.75, 0.75]
-        )
+    cols = st.columns(
+    [0.5, 1.2, 1.2, 1.3, 2.0,
+     0.70, 0.70, 0.70, 0.70, 0.70, 0.70, 0.70, 0.70, 0.70, 0.70]
+)
+
         headers = ["XI", "Uloga", "Poz.", "SA", "Name",
                    "Q", "Kp", "Tk", "Pa", "Sh", "He", "Sp", "St", "Pe", "Bc"]
         for c, h in zip(cols, headers):
@@ -462,10 +463,10 @@ def build_team(side: str) -> Team:
             pl = squad[idx]
             key_prefix = f"{side}_pl_{idx}"
 
-            cols = st.columns(
-                [0.5, 1.0, 1.0, 1.4, 2.4,
-                 0.75, 0.75, 0.75, 0.75, 0.75, 0.75, 0.75, 0.75, 0.75, 0.75]
-            )
+        cols = st.columns(
+       [0.5, 1.2, 1.2, 1.3, 2.0,
+        0.70, 0.70, 0.70, 0.70, 0.70, 0.70, 0.70, 0.70, 0.70, 0.70]
+)
 
             # XI checkbox
             with cols[0]:
@@ -520,13 +521,15 @@ def build_team(side: str) -> Team:
             else:
                 color = "#e0e0e0"
 
-            with cols[4]:
-                st.markdown(
-                    f"<div style='background-color:{color};"
-                    f"padding:2px 6px;border-radius:4px;color:black;'>"
-                    f"{pl['name']}</div>",
-                    unsafe_allow_html=True,
-                )
+        with cols[4]:
+        st.markdown(
+        f"<div style='background-color:{color};"
+        f"padding:1px 4px;border-radius:4px;color:black;"
+        f"font-size:11px; white-space:nowrap;"
+        f"overflow:hidden; text-overflow:ellipsis;'>"
+        f"{pl['name']}</div>",
+        unsafe_allow_html=True,
+        )
 
             # atributi (sa smanjenom širinom kolona)
             with cols[5]:
