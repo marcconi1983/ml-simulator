@@ -14,6 +14,7 @@ import requests
 @dataclass
 class Player:
     name: str
+    age: int
     position: str  # GK, DL, DC, DR, ML, MC, MR, ST...
     role: str      # Gk, Def, Mid, Att (za engine)
     q: float
@@ -80,14 +81,14 @@ def pos_to_role(pos: str) -> str:
 
 
 # ============================
-#   SCRAPER ZA ml-club.eu
+#   SCRAPER ZA ml-club.eu / ML
 # ============================
 
 def scrape_team_from_ml_club(url: str) -> List[Dict[str, float]]:
     """
     Prima link sa ml-club.eu ili ML team link (pretvara ga).
     Vraća listu dict-ova:
-      { 'name', 'age', 'q','kp','tk','pa','sh','he','sp','st','pe','bc' }
+      { 'age','name','q','kp','tk','pa','sh','he','sp','st','pe','bc' }
     """
     players: List[Dict[str, float]] = []
     if not url.strip():
@@ -95,7 +96,7 @@ def scrape_team_from_ml_club(url: str) -> List[Dict[str, float]]:
 
     url = url.strip()
 
-    # ako je nalepio ML link, npr https://football.managerleague.com/ml/team/118270
+    # ako je ML link, npr https://football.managerleague.com/ml/team/118270
     m = re.search(r"/team/(\d+)", url)
     if "football.managerleague.com" in url and m:
         team_id = m.group(1)
@@ -118,6 +119,7 @@ def scrape_team_from_ml_club(url: str) -> List[Dict[str, float]]:
 
     body = text[idx + len(header):]
 
+    # primer reda:
     # 31 Predrag Rajković 96.250 98 79 86 71 74 97 94 96 95 89.513 93 4
     row_pattern = re.compile(
         r"(\d+)\s+([^\d]+?)\s+([\d.]+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)",
@@ -203,12 +205,7 @@ def average_q(team: Team) -> float:
 def compute_line_ratings(team: Team) -> Tuple[float, float]:
     """
     Vraća (attack_rating, defense_rating).
-    U obzir uzima:
-      - Q + atribute
-      - ulogu (Gk/Def/Mid/Att)
-      - poziciju (DL vs DC, ML vs MC...)
-      - team stats
-      - stil, pressure, home
+    U obzir uzima Q + atribute + poziciju + team stats + stil + pressure + home.
     """
     base_q = average_q(team)
     atk_raw = 0.0
@@ -252,22 +249,18 @@ def compute_line_ratings(team: Team) -> Tuple[float, float]:
             deff = 0.40 * p.q + 0.15 * p.bc + 0.10 * p.st
             atk = 0.02 * p.pa
 
-        # fino podešavanje po poziciji
+        # fino po poziciji
         if pos in ("DL", "DR"):
-            # bekovi – više brzina/pas, manje duel
             atk *= 1.05
             deff *= 0.97
             atk += 0.05 * p.sp + 0.05 * p.pa
         elif pos in ("DC", "DCL", "DCR"):
-            # centralni defovi – više tackl/he
             deff *= 1.05
             deff += 0.05 * p.tk + 0.05 * p.he
         elif pos in ("ML", "MR", "AML", "AMR", "STL", "STR"):
-            # krila / wide napad
             atk *= 1.05
             atk += 0.05 * p.sp + 0.05 * p.sh
         elif pos in ("DML", "DMR", "DMC"):
-            # def. vezni
             deff *= 1.03
             deff += 0.05 * p.tk
 
@@ -444,19 +437,22 @@ def build_team(side: str) -> Team:
     if squad:
         st.subheader(f"{side} – sastav (čekiraj 11 igrača za simulaciju)")
 
+        # header red, kao ml-club
+        cols = st.columns([0.6, 0.8, 0.7, 2.0, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7])
+        headers = ["XI", "Poz.", "Age", "Name", "Q", "Kp", "Tk", "Pa", "Sh", "He", "Sp", "St", "Pe", "Bc"]
+        for c, h in zip(cols, headers):
+            c.write(f"**{h}**")
+
         for idx, pl in enumerate(squad):
             key_prefix = f"{side}_pl_{idx}"
-            cols = st.columns(7)
+            cols = st.columns([0.6, 0.8, 0.7, 2.0, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7])
 
             with cols[0]:
-                # sada su SVI default čekirani (ti skidaš rezervu)
-                use = st.checkbox("XI", value=True, key=f"{key_prefix}_use")
+                # svi čekirani po difoltu; ti odčekiraš klupu
+                use = st.checkbox("", value=True, key=f"{key_prefix}_use")
 
             with cols[1]:
-                st.write(pl["name"])
-
-            with cols[2]:
-                # gruba pretpostavka: 1. igrač GK, sledeća 4 def, ostatak mid/att
+                # gruba pretpostavka: 1. igrač GK, sledeća 4 def, ostalo mid
                 if idx == 0:
                     pos_default = "GK"
                 elif 1 <= idx <= 4:
@@ -469,57 +465,66 @@ def build_team(side: str) -> Team:
                     default_index = 0
 
                 pos = st.selectbox(
-                    "Poz.",
+                    "",
                     POS_OPTIONS,
                     index=default_index,
                     key=f"{key_prefix}_pos",
                 )
 
+            with cols[2]:
+                st.write(int(pl["age"]))
+
             with cols[3]:
-                q = st.number_input(
-                    "Q", 0, 100, int(round(pl["q"])),
-                    key=f"{key_prefix}_q",
-                )
-                kp = st.number_input(
-                    "Kp", 0, 100, int(pl["kp"]),
-                    key=f"{key_prefix}_kp",
-                )
-                tk = st.number_input(
-                    "Tk", 0, 100, int(pl["tk"]),
-                    key=f"{key_prefix}_tk",
-                )
+                st.write(pl["name"])
 
             with cols[4]:
+                q = st.number_input(
+                    "", 0, 100, int(round(pl["q"])),
+                    key=f"{key_prefix}_q",
+                )
+            with cols[5]:
+                kp = st.number_input(
+                    "", 0, 100, int(pl["kp"]),
+                    key=f"{key_prefix}_kp",
+                )
+            with cols[6]:
+                tk = st.number_input(
+                    "", 0, 100, int(pl["tk"]),
+                    key=f"{key_prefix}_tk",
+                )
+            with cols[7]:
                 pa = st.number_input(
-                    "Pa", 0, 100, int(pl["pa"]),
+                    "", 0, 100, int(pl["pa"]),
                     key=f"{key_prefix}_pa",
                 )
+            with cols[8]:
                 sh = st.number_input(
-                    "Sh", 0, 100, int(pl["sh"]),
+                    "", 0, 100, int(pl["sh"]),
                     key=f"{key_prefix}_sh",
                 )
+            with cols[9]:
                 he = st.number_input(
-                    "He", 0, 100, int(pl["he"]),
+                    "", 0, 100, int(pl["he"]),
                     key=f"{key_prefix}_he",
                 )
-
-            with cols[5]:
+            with cols[10]:
                 sp = st.number_input(
-                    "Sp", 0, 100, int(pl["sp"]),
+                    "", 0, 100, int(pl["sp"]),
                     key=f"{key_prefix}_sp",
                 )
+            with cols[11]:
                 st_attr = st.number_input(
-                    "St", 0, 100, int(pl["st"]),
+                    "", 0, 100, int(pl["st"]),
                     key=f"{key_prefix}_st",
                 )
-
-            with cols[6]:
+            with cols[12]:
                 pe = st.number_input(
-                    "Pe", 0, 100, int(pl["pe"]),
+                    "", 0, 100, int(pl["pe"]),
                     key=f"{key_prefix}_pe",
                 )
+            with cols[13]:
                 bc = st.number_input(
-                    "Bc", 0, 100, int(pl["bc"]),
+                    "", 0, 100, int(pl["bc"]),
                     key=f"{key_prefix}_bc",
                 )
 
@@ -528,6 +533,7 @@ def build_team(side: str) -> Team:
                 players.append(
                     Player(
                         name=pl["name"],
+                        age=int(pl["age"]),
                         position=pos,
                         role=role,
                         q=float(q),
@@ -565,9 +571,8 @@ def build_team(side: str) -> Team:
 # ============================
 
 def main():
-    st.title("ManagerLeague – taktički simulator (ml-club import + pozicije)")
+    st.title("ManagerLeague – taktički simulator (ml-club import)")
 
-    # TEREN
     st.subheader("Teren")
     ground = st.radio(
         "",
@@ -576,11 +581,11 @@ def main():
         horizontal=True,
     )
 
-    colA, colB = st.columns(2)
-    with colA:
-        team_a = build_team("Ja")
-    with colB:
-        team_b = build_team("Protivnik")
+    # moj tim gore
+    team_a = build_team("Ja")
+    st.markdown("---")
+    # protivnik ispod
+    team_b = build_team("Protivnik")
 
     if ground == "Neutralno":
         team_a.home = False
