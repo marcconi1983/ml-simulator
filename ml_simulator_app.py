@@ -16,7 +16,7 @@ class Player:
     name: str
     age: int
     role: str      # Gk, Def, Mid, Att
-    position: str  # GK, DC, DCL, DL, MR, ST...
+    position: str  # GK, DC, DL, MR, ST...
     q: float
     kp: float
     tk: float
@@ -61,10 +61,12 @@ ROLE_COLOR = {
     "Att": "#ef5350",  # crveno
 }
 
+# POZICIJE PO ULOZI
 POS_BY_ROLE = {
     "Gk": ["GK"],
     "Def": ["DC", "DCL", "DCR", "DL", "DR"],
-    "Mid": ["DMC", "DML", "DMR", "MC", "MCL", "MCR", "ML", "MR", "AMC", "AML", "AMR"],
+    # Mid kako si tražio: samo centralne i krila, bez DMC itd.
+    "Mid": ["MC", "MCL", "MCR", "ML", "MR"],
     "Att": ["ST", "STL", "STR"],
 }
 
@@ -237,9 +239,6 @@ def compute_line_ratings(team: Team) -> Tuple[float, float]:
         elif pos in ("ML", "MR", "AML", "AMR", "STL", "STR"):
             atk *= 1.05
             atk += 0.05 * p.sp + 0.05 * p.sh
-        elif pos in ("DML", "DMR", "DMC"):
-            deff *= 1.03
-            deff += 0.05 * p.tk
 
         atk_raw += atk
         def_raw += deff
@@ -414,10 +413,10 @@ def build_team(side: str) -> Team:
     if squad:
         st.subheader(f"{side} – sastav (čekiraj 11 igrača za simulaciju)")
 
-        # NEMA kolone Age → više prostora za atribute
+        # tabela – bez Age, više prostora za atribute
         cols = st.columns(
-            [0.5, 1.4, 1.4, 2.2,
-             1.1, 1.1, 1.1, 1.1, 1.1, 1.1, 1.1, 1.1, 1.1, 1.1]
+            [0.5, 1.3, 1.3, 2.4,
+             1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
         )
         headers = ["XI", "Uloga", "Poz.", "Name",
                    "Q", "Kp", "Tk", "Pa", "Sh", "He", "Sp", "St", "Pe", "Bc"]
@@ -427,8 +426,8 @@ def build_team(side: str) -> Team:
         for idx, pl in enumerate(squad):
             key_prefix = f"{side}_pl_{idx}"
             cols = st.columns(
-                [0.5, 1.4, 1.4, 2.2,
-                 1.1, 1.1, 1.1, 1.1, 1.1, 1.1, 1.1, 1.1, 1.1, 1.1]
+                [0.5, 1.3, 1.3, 2.4,
+                 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
             )
 
             with cols[0]:
@@ -452,13 +451,12 @@ def build_team(side: str) -> Team:
                     ROLE_OPTIONS,
                     key=role_key,
                 )
-                # dodat label ispod da uvek vidiš šta je izabrano
                 st.markdown(
                     f"<div style='font-size:11px;text-align:center;'>{role}</div>",
                     unsafe_allow_html=True,
                 )
 
-            # ---- Pozicija (u zavisnosti od uloge) ----
+            # ---- Pozicija ----
             with cols[2]:
                 pos_options = POS_BY_ROLE.get(role, ["GK"])
                 pos_key = f"{key_prefix}_pos"
@@ -481,7 +479,7 @@ def build_team(side: str) -> Team:
                     unsafe_allow_html=True,
                 )
 
-            # ---- atributi (Q sada dvocifreno, pun prikaz) ----
+            # --- atributi (Q i ostalo) ---
             with cols[4]:
                 q = st.number_input(
                     "",
@@ -553,6 +551,21 @@ def build_team(side: str) -> Team:
 
 def main():
     st.title("ManagerLeague – taktički simulator (ml-club import)")
+
+    # globalni CSS za brojčana polja – manji font, manje paddinga,
+    # da lepo stanu dve cifre u prozor
+    st.markdown(
+        """
+        <style>
+        div[data-baseweb="input"] input {
+            font-size: 11px !important;
+            padding: 0 4px !important;
+            text-align: center !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
     st.subheader("Teren")
     ground = st.radio(
